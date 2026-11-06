@@ -1,0 +1,472 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-05T21:09:51.539Z",
+  "title": "Design System: Dispatch Desk",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Dispatch blue",
+        "canonical": "#2857bf",
+        "tonalRamp": [
+          "oklch(15% 0.065 263.2)",
+          "oklch(27% 0.108 263.2)",
+          "oklch(39% 0.144 263.2)",
+          "oklch(51% 0.172 263.2)",
+          "oklch(63% 0.172 263.2)",
+          "oklch(75% 0.137 263.2)",
+          "oklch(87% 0.084 263.2)",
+          "oklch(95% 0.034 263.2)"
+        ]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Pressed denim",
+        "canonical": "#19459f",
+        "tonalRamp": [
+          "oklch(15% 0.059 262.3)",
+          "oklch(27% 0.097 262.3)",
+          "oklch(39% 0.130 262.3)",
+          "oklch(51% 0.154 262.3)",
+          "oklch(63% 0.154 262.3)",
+          "oklch(75% 0.123 262.3)",
+          "oklch(87% 0.076 262.3)",
+          "oklch(95% 0.031 262.3)"
+        ]
+      },
+      "rail-strong": {
+        "role": "secondary",
+        "displayName": "Selected navy",
+        "canonical": "#22344e",
+        "tonalRamp": [
+          "oklch(15% 0.020 257.5)",
+          "oklch(27% 0.033 257.5)",
+          "oklch(39% 0.044 257.5)",
+          "oklch(51% 0.052 257.5)",
+          "oklch(63% 0.052 257.5)",
+          "oklch(75% 0.042 257.5)",
+          "oklch(87% 0.026 257.5)",
+          "oklch(95% 0.010 257.5)"
+        ]
+      },
+      "blue-bg": {
+        "role": "secondary",
+        "displayName": "Blue paper",
+        "canonical": "#eef3ff",
+        "tonalRamp": [
+          "oklch(15% 0.006 267.8)",
+          "oklch(27% 0.011 267.8)",
+          "oklch(39% 0.014 267.8)",
+          "oklch(51% 0.017 267.8)",
+          "oklch(63% 0.017 267.8)",
+          "oklch(75% 0.014 267.8)",
+          "oklch(87% 0.008 267.8)",
+          "oklch(95% 0.003 267.8)"
+        ]
+      },
+      "active": {
+        "role": "tertiary",
+        "displayName": "Editable green",
+        "canonical": "#106451",
+        "tonalRamp": [
+          "oklch(15% 0.031 172.8)",
+          "oklch(27% 0.051 172.8)",
+          "oklch(39% 0.069 172.8)",
+          "oklch(51% 0.082 172.8)",
+          "oklch(63% 0.082 172.8)",
+          "oklch(75% 0.065 172.8)",
+          "oklch(87% 0.040 172.8)",
+          "oklch(95% 0.016 172.8)"
+        ]
+      },
+      "active-bg": {
+        "role": "tertiary",
+        "displayName": "Soft mint",
+        "canonical": "#e7f5ee",
+        "tonalRamp": [
+          "oklch(15% 0.007 164.7)",
+          "oklch(27% 0.011 164.7)",
+          "oklch(39% 0.015 164.7)",
+          "oklch(51% 0.017 164.7)",
+          "oklch(63% 0.017 164.7)",
+          "oklch(75% 0.014 164.7)",
+          "oklch(87% 0.009 164.7)",
+          "oklch(95% 0.003 164.7)"
+        ]
+      },
+      "pending-bg": {
+        "role": "tertiary",
+        "displayName": "Pending amber",
+        "canonical": "#fff6e4",
+        "tonalRamp": [
+          "oklch(15% 0.010 84.6)",
+          "oklch(27% 0.016 84.6)",
+          "oklch(39% 0.021 84.6)",
+          "oklch(51% 0.026 84.6)",
+          "oklch(63% 0.026 84.6)",
+          "oklch(75% 0.020 84.6)",
+          "oklch(87% 0.013 84.6)",
+          "oklch(95% 0.005 84.6)"
+        ]
+      },
+      "pending-ink": {
+        "role": "tertiary",
+        "displayName": "Amber ink",
+        "canonical": "#795018",
+        "tonalRamp": [
+          "oklch(15% 0.034 70.2)",
+          "oklch(27% 0.056 70.2)",
+          "oklch(39% 0.074 70.2)",
+          "oklch(51% 0.089 70.2)",
+          "oklch(63% 0.089 70.2)",
+          "oklch(75% 0.071 70.2)",
+          "oklch(87% 0.043 70.2)",
+          "oklch(95% 0.018 70.2)"
+        ]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "Error red",
+        "canonical": "#8c2626",
+        "tonalRamp": [
+          "oklch(15% 0.052 25.1)",
+          "oklch(27% 0.087 25.1)",
+          "oklch(39% 0.115 25.1)",
+          "oklch(51% 0.137 25.1)",
+          "oklch(63% 0.137 25.1)",
+          "oklch(75% 0.110 25.1)",
+          "oklch(87% 0.067 25.1)",
+          "oklch(95% 0.027 25.1)"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Cool paper",
+        "canonical": "#f4f6f9",
+        "tonalRamp": [
+          "oklch(15% 0.002 258.3)",
+          "oklch(27% 0.003 258.3)",
+          "oklch(39% 0.004 258.3)",
+          "oklch(51% 0.005 258.3)",
+          "oklch(63% 0.005 258.3)",
+          "oklch(75% 0.004 258.3)",
+          "oklch(87% 0.002 258.3)",
+          "oklch(95% 0.001 258.3)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "White surface",
+        "canonical": "#fff",
+        "tonalRamp": [
+          "oklch(15% 0.000 0)",
+          "oklch(27% 0.000 0)",
+          "oklch(39% 0.000 0)",
+          "oklch(51% 0.000 0)",
+          "oklch(63% 0.000 0)",
+          "oklch(75% 0.000 0)",
+          "oklch(87% 0.000 0)",
+          "oklch(95% 0.000 0)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Deep ink",
+        "canonical": "#142336",
+        "tonalRamp": [
+          "oklch(15% 0.016 254.9)",
+          "oklch(27% 0.026 254.9)",
+          "oklch(39% 0.035 254.9)",
+          "oklch(51% 0.042 254.9)",
+          "oklch(63% 0.042 254.9)",
+          "oklch(75% 0.033 254.9)",
+          "oklch(87% 0.020 254.9)",
+          "oklch(95% 0.008 254.9)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted slate",
+        "canonical": "#4e6075",
+        "tonalRamp": [
+          "oklch(15% 0.015 252.5)",
+          "oklch(27% 0.026 252.5)",
+          "oklch(39% 0.034 252.5)",
+          "oklch(51% 0.041 252.5)",
+          "oklch(63% 0.041 252.5)",
+          "oklch(75% 0.032 252.5)",
+          "oklch(87% 0.020 252.5)",
+          "oklch(95% 0.008 252.5)"
+        ]
+      },
+      "faint": {
+        "role": "neutral",
+        "displayName": "Fine rule",
+        "canonical": "#dce4ed",
+        "tonalRamp": [
+          "oklch(15% 0.006 251.2)",
+          "oklch(27% 0.009 251.2)",
+          "oklch(39% 0.013 251.2)",
+          "oklch(51% 0.015 251.2)",
+          "oklch(63% 0.015 251.2)",
+          "oklch(75% 0.012 251.2)",
+          "oklch(87% 0.007 251.2)",
+          "oklch(95% 0.003 251.2)"
+        ]
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Rail navy",
+        "canonical": "#17253a",
+        "tonalRamp": [
+          "oklch(15% 0.017 258.3)",
+          "oklch(27% 0.028 258.3)",
+          "oklch(39% 0.037 258.3)",
+          "oklch(51% 0.044 258.3)",
+          "oklch(63% 0.044 258.3)",
+          "oklch(75% 0.035 258.3)",
+          "oklch(87% 0.022 258.3)",
+          "oklch(95% 0.009 258.3)"
+        ]
+      },
+      "rail-text": {
+        "role": "neutral",
+        "displayName": "Rail text",
+        "canonical": "#b8c7dc",
+        "tonalRamp": [
+          "oklch(15% 0.013 256.8)",
+          "oklch(27% 0.021 256.8)",
+          "oklch(39% 0.028 256.8)",
+          "oklch(51% 0.034 256.8)",
+          "oklch(63% 0.034 256.8)",
+          "oklch(75% 0.027 256.8)",
+          "oklch(87% 0.017 256.8)",
+          "oklch(95% 0.007 256.8)"
+        ]
+      },
+      "voice-stage": {
+        "role": "neutral",
+        "displayName": "Call navy",
+        "canonical": "#192a44",
+        "tonalRamp": [
+          "oklch(15% 0.020 258.6)",
+          "oklch(27% 0.034 258.6)",
+          "oklch(39% 0.045 258.6)",
+          "oklch(51% 0.053 258.6)",
+          "oklch(63% 0.053 258.6)",
+          "oklch(75% 0.043 258.6)",
+          "oklch(87% 0.026 258.6)",
+          "oklch(95% 0.011 258.6)"
+        ]
+      },
+      "button-stroke": {
+        "role": "neutral",
+        "displayName": "Button stroke",
+        "canonical": "#cfd9e6",
+        "tonalRamp": [
+          "oklch(15% 0.008 254.9)",
+          "oklch(27% 0.013 254.9)",
+          "oklch(39% 0.018 254.9)",
+          "oklch(51% 0.021 254.9)",
+          "oklch(63% 0.021 254.9)",
+          "oklch(75% 0.017 254.9)",
+          "oklch(87% 0.010 254.9)",
+          "oklch(95% 0.004 254.9)"
+        ]
+      },
+      "field-stroke": {
+        "role": "neutral",
+        "displayName": "Field stroke",
+        "canonical": "#cbd7e7",
+        "tonalRamp": [
+          "oklch(15% 0.010 255.6)",
+          "oklch(27% 0.016 255.6)",
+          "oklch(39% 0.022 255.6)",
+          "oklch(51% 0.026 255.6)",
+          "oklch(63% 0.026 255.6)",
+          "oklch(75% 0.021 255.6)",
+          "oklch(87% 0.013 255.6)",
+          "oklch(95% 0.005 255.6)"
+        ]
+      },
+      "on-rail": {
+        "role": "neutral",
+        "displayName": "On navy",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0.000 0)",
+          "oklch(27% 0.000 0)",
+          "oklch(39% 0.000 0)",
+          "oklch(51% 0.000 0)",
+          "oklch(63% 0.000 0)",
+          "oklch(75% 0.000 0)",
+          "oklch(87% 0.000 0)",
+          "oklch(95% 0.000 0)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Workspace heading",
+        "purpose": "Primary page heading."
+      },
+      "title": {
+        "displayName": "Panel title",
+        "purpose": "Section names in panel headers."
+      },
+      "body": {
+        "displayName": "Transcript copy",
+        "purpose": "Multilingual call turns."
+      },
+      "label": {
+        "displayName": "Turn author",
+        "purpose": "Identifies caller and dispatch agent."
+      }
+    },
+    "shadows": [
+      {
+        "name": "panel-low",
+        "value": "0 2px 6px #172c4710",
+        "purpose": "Soft separation of white panels from the canvas."
+      },
+      {
+        "name": "nav-selected-inset",
+        "value": "inset 0 0 0 1px #37506f",
+        "purpose": "Defines the selected rail item."
+      }
+    ],
+    "motion": [
+      {
+        "name": "button-state",
+        "value": "150ms ease",
+        "purpose": "Color and border transitions on buttons."
+      },
+      {
+        "name": "voice-level",
+        "value": "110ms ease",
+        "purpose": "Waveform scale changes on voice activity."
+      },
+      {
+        "name": "voice-speaking",
+        "value": "680ms ease-in-out infinite alternate",
+        "purpose": "Speaking indicator with staggered waveform bars."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "Near-instant durations under the reduced-motion preference."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-desktop",
+        "value": "1160px"
+      },
+      {
+        "name": "horizontal-rail",
+        "value": "930px"
+      },
+      {
+        "name": "stacked-workspace",
+        "value": "680px"
+      },
+      {
+        "name": "condensed-controls",
+        "value": "360px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Send button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Submits a caller turn from the message field.",
+      "html": "<button class=\"ds-send\" type=\"button\">Send</button>",
+      "css": ".ds-send{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:41px;padding:8px 13px;border:1px solid transparent;border-radius:8px;font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif;font-size:.84rem;font-weight:680;transition:background-color 150ms ease,border-color 150ms ease,color 150ms ease;color:#fff;background:var(--primary,#2857bf)}.ds-send:hover:not(:disabled){background:var(--primary-hover,#19459f)}.ds-send:focus-visible{outline:3px solid var(--primary,#2857bf);outline-offset:3px}.ds-send:disabled{opacity:.58}"
+    },
+    {
+      "name": "Reset button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Returns the demonstration to its opening order state.",
+      "html": "<button class=\"ds-reset\" type=\"button\">Reset demo</button>",
+      "css": ".ds-reset{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:41px;padding:8px 13px;border:1px solid transparent;border-radius:8px;font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif;font-size:.84rem;font-weight:680;transition:background-color 150ms ease,border-color 150ms ease,color 150ms ease;background:var(--surface,#fff);border-color:#cfd9e6;color:#30465f}.ds-reset:hover:not(:disabled){background:#eaf0f9;border-color:#9baec5}.ds-reset:focus-visible{outline:3px solid var(--primary,#2857bf);outline-offset:3px}.ds-reset:disabled{opacity:.58}"
+    },
+    {
+      "name": "Message field",
+      "kind": "input",
+      "refersTo": "message-field",
+      "description": "Takes typed turns in the selected language.",
+      "html": "<input class=\"ds-message\" type=\"text\" aria-label=\"Type a message\" placeholder=\"उदा. तांदळाच्या बारा पिशव्या करा\">",
+      "css": ".ds-message{min-height:42px;padding:8px 11px;border:1px solid #cbd7e7;border-radius:8px;background:var(--surface,#fff);color:var(--ink,#142336);font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif;font-size:.9rem;caret-color:var(--primary,#2857bf)}.ds-message::placeholder{color:#52657f;opacity:1}.ds-message:focus-visible{outline:3px solid var(--primary,#2857bf);outline-offset:3px}.ds-message:disabled{background:#f6f8fb}"
+    },
+    {
+      "name": "Selected navigation link",
+      "kind": "nav",
+      "refersTo": "rail-nav-selected",
+      "description": "Identifies the active section in the navigation rail.",
+      "html": "<a class=\"ds-nav\" href=\"#order-record\" aria-current=\"location\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8m-8 4h8\"/></svg> Order record</a>",
+      "css": ".ds-nav{display:inline-flex;align-items:center;gap:10px;min-height:42px;padding:9px 10px;border-radius:8px;background:var(--rail-strong,#22344e);box-shadow:inset 0 0 0 1px #37506f;color:#fff;font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif;font-size:.875rem;font-weight:550;text-decoration:none}.ds-nav svg{color:#b5caff}.ds-nav:hover{background:#23354e}.ds-nav:focus-visible{outline:3px solid #6e98f1;outline-offset:3px}"
+    },
+    {
+      "name": "Editable status",
+      "kind": "chip",
+      "refersTo": "status-editable",
+      "description": "Marks an order line whose dispatch state permits changes.",
+      "html": "<span class=\"ds-editable\">Editable</span>",
+      "css": ".ds-editable{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:4px 8px;background:var(--active-bg,#e7f5ee);color:#15614f;font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif;font-size:.72rem;font-weight:700;white-space:nowrap}"
+    },
+    {
+      "name": "Order panel",
+      "kind": "card",
+      "refersTo": "order-panel",
+      "description": "Groups the order identity, fulfillment rows, and proposed edit.",
+      "html": "<section class=\"ds-order\"><header class=\"ds-order-title\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8m-8 4h8\"/></svg> Order record</header><div class=\"ds-order-body\"><strong>DD-2048</strong><p>Shree Ganesh Kirana</p></div></section>",
+      "css": ".ds-order{background:var(--surface,#fff);border:1px solid var(--faint,#dce4ed);border-radius:var(--radius,14px);box-shadow:0 2px 6px #172c4710;color:var(--ink,#142336);font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif}.ds-order-title{display:flex;align-items:center;gap:9px;min-height:60px;padding:0 21px;border-bottom:1px solid var(--faint,#dce4ed);font-size:1rem;font-weight:700}.ds-order-title svg{color:#536c8b}.ds-order-body{padding:17px 21px 14px}.ds-order-body strong{font-size:1.43rem;font-weight:740;font-variant-numeric:tabular-nums}.ds-order-body p{margin:3px 0 0;color:var(--muted,#4e6075);font-size:.875rem}"
+    },
+    {
+      "name": "Pending confirmation",
+      "kind": "custom",
+      "refersTo": "pending-confirmation",
+      "description": "Shows a proposed quantity before the caller confirms it.",
+      "html": "<div class=\"ds-pending\"><div class=\"ds-pending-label\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg><strong>Awaiting confirmation</strong></div><div class=\"ds-pending-quantity\">Rice&nbsp; 20 → <strong>10</strong></div><p>Confirm the new quantity to update the order.</p></div>",
+      "css": ".ds-pending{display:grid;gap:5px;padding:11px 12px;border:1px solid #ebcf96;border-radius:8px;background:var(--pending-bg,#fff6e4);color:var(--ink,#142336);font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif}.ds-pending-label{display:flex;align-items:center;gap:6px;color:var(--pending-ink,#795018);font-size:.81rem}.ds-pending-quantity{font-size:.875rem;font-weight:650}.ds-pending-quantity strong{color:var(--pending-ink,#795018)}.ds-pending p{margin:0;color:var(--muted,#4e6075);font-size:.79rem;line-height:1.45}"
+    },
+    {
+      "name": "Call control",
+      "kind": "custom",
+      "refersTo": "call-stage",
+      "description": "Shows the current voice activity and access to the microphone.",
+      "html": "<div class=\"ds-call\"><div class=\"ds-call-copy\"><strong>Listening</strong><p>Speak naturally in Hindi or Marathi.</p></div><button class=\"ds-call-button\" type=\"button\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" aria-hidden=\"true\"><rect x=\"9\" y=\"2\" width=\"6\" height=\"12\" rx=\"3\"/><path d=\"M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-3 0h6\"/></svg> End voice</button></div>",
+      "css": ".ds-call{display:flex;align-items:center;gap:12px;min-height:94px;padding:13px 15px;border-radius:10px;background:#192a44;color:#fff;font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif}.ds-call-copy{flex:1}.ds-call strong{font-size:.91rem;font-weight:680}.ds-call p{margin:3px 0 0;color:#c0d0e7;font-size:.79rem;line-height:1.4}.ds-call-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:41px;padding:8px 13px;border:1px solid transparent;border-radius:8px;font-family:\"Segoe UI\", \"Nirmala UI\", \"Noto Sans Devanagari\", system-ui, sans-serif;font-size:.84rem;font-weight:680;transition:background-color 150ms ease,border-color 150ms ease,color 150ms ease;padding-inline:10px;background:#f4e6ea;color:#762741}.ds-call-button:hover{background:#fff}.ds-call-button:focus-visible{outline:3px solid #6e98f1;outline-offset:3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Dispatch counter",
+    "overview": "A dark navigation rail frames a cool paper workspace. The call panel carries the conversation and controls, and the order record shows the evidence for the agent’s decision. The call stage uses the same navy family as navigation and gives listening and playback a distinct place on the screen.\n\nA confirmed change is visible in the order quantity and the change log. Proposed quantities sit in an amber panel and keep their own visual status.",
+    "keyCharacteristics": [
+      "Navy navigation and call stage with a cool paper workspace.",
+      "Compact type, fine borders, and line icons.",
+      "Distinct order states with text, color, and icons."
+    ],
+    "rules": [
+      {
+        "name": "The Dispatch State Rule",
+        "body": "Use amber for a change awaiting confirmation and green for an editable line or a recorded update. Keep each state legible in text.",
+        "section": "colors"
+      },
+      {
+        "name": "The Order Figure Rule",
+        "body": "Use tabular numerals for order identifiers and quantity columns.",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "Do group the draft quantity and the confirmation instruction inside the pending panel.",
+      "Do keep turn labels and the language selector visible in the call workspace.",
+      "Do preserve the same status words in narrow layouts."
+    ],
+    "donts": []
+  }
+}
