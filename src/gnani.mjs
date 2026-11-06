@@ -64,7 +64,7 @@ export async function transcribe(audioBuffer, { language, signal } = {}) {
   const detected = data.detected_language_code === 'hi-en' ? 'hi-IN' : data.detected_language_code;
   return {
     text: data.transcript.trim(),
-    language: LANGUAGES.has(detected) ? detected : LANGUAGES.has(requested) ? requested : 'hi-IN'
+    language: LANGUAGES.has(requested) ? requested : LANGUAGES.has(detected) ? detected : 'hi-IN'
   };
 }
 

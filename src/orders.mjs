@@ -1,10 +1,10 @@
-import { ORDER_ID, products, quantities, quantityAliases } from './order-data.mjs';
+import { productLanguage, quantities, quantityAliases } from './order-data.mjs';
 
 const localeKeys = { 'en-IN': 'en', 'hi-IN': 'hi', 'mr-IN': 'mr' };
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const boundary = (pattern) => `(?<![\\p{L}\\p{M}\\p{N}])(?:${pattern})(?![\\p{L}\\p{M}\\p{N}])`;
 const phrases = (values) => new RegExp(boundary(values.map(escapeRegex).join('|')), 'u');
-const aliases = Object.fromEntries(Object.entries(products).map(([id, product]) => [id, phrases(product.aliases)]));
+const maxQuantity = 1_000_000;
 
 const numberWords = new Map(Object.entries(quantityAliases));
 for (const language of Object.values(quantities)) {
@@ -85,28 +85,69 @@ function extractQuantity(text) {
   return { ambiguous: true };
 }
 
-function mentionIds(text) {
-  return Object.keys(aliases).filter((id) => aliases[id].test(text));
+function languageInfo(item) {
+  const name = normalize(item.name);
+  return Object.values(productLanguage).find((product) => product.aliases.includes(name));
+}
+
+function itemMatcher(items) {
+  const idsByAlias = new Map();
+  for (const item of items) {
+    const names = [item.id, item.sku, item.name, item.nameHi, item.nameMr, ...(item.aliases ?? []), ...(languageInfo(item)?.aliases ?? [])];
+    for (const value of names) {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      const alias = normalize(value);
+      if (!idsByAlias.has(alias)) idsByAlias.set(alias, new Set());
+      idsByAlias.get(alias).add(item.id);
+    }
+  }
+  const aliases = [...idsByAlias.keys()].sort((a, b) => b.length - a.length);
+  const match = aliases.length ? new RegExp(boundary(aliases.map(escapeRegex).join('|')), 'gu') : null;
+  return {
+    ids(text) {
+      if (!match) return [];
+      return [...new Set([...text.matchAll(match)].flatMap(([alias]) => [...idsByAlias.get(alias)]))];
+    },
+    withoutItems(text) {
+      return match ? text.replace(match, ' ') : text;
+    },
+  };
+}
+
+function unitFamily(unit) {
+  if (bags.test(unit)) return 'bags';
+  if (cases.test(unit)) return 'cases';
+  if (/^(?:kg|kilos?|kilograms?|किलो|किलोग्राम)$/u.test(unit)) return 'kg';
+  if (/^(?:l|litres?|liters?|लिटर|लीटर)$/u.test(unit)) return 'litre';
+  return unit;
 }
 
 function describeAmount(item, quantity, locale) {
-  if (locale === 'en') return `${quantities.en[quantity] ?? quantity} ${quantity === 1 ? item.unit.slice(0, -1) : item.unit}`;
+  if (locale === 'en') return `${quantities.en[quantity] ?? quantity} ${item.unit}`;
   const number = quantities[locale][quantity] ?? quantity;
-  return `${number} ${products[item.id][locale][quantity === 1 ? 1 : 2]}`;
+  const unit = {
+    bags: { hi: ['बोरी', 'बोरियाँ'], mr: ['पिशवी', 'पिशव्या'] },
+    cases: { hi: ['डिब्बा', 'डिब्बे'], mr: ['खोका', 'खोके'] },
+    kg: { hi: ['किलो', 'किलो'], mr: ['किलो', 'किलो'] },
+    litre: { hi: ['लीटर', 'लीटर'], mr: ['लिटर', 'लिटर'] },
+  }[unitFamily(normalize(item.unit))]?.[locale]?.[quantity === 1 ? 0 : 1] ?? item.unit;
+  return `${number} ${unit}`;
 }
 
 function productName(item, locale) {
-  return locale === 'en' ? item.name.toLowerCase() : products[item.id][locale][0];
+  return (locale === 'hi' ? item.nameHi : locale === 'mr' ? item.nameMr : '') || languageInfo(item)?.[locale]?.[0] || item.name;
 }
 
 function marathiItemAmount(item, quantity) {
-  const product = { rice: 'तांदळाच्या', sugar: 'साखरेच्या', oil: 'तेलाचे' }[item.id];
-  return `${product} ${describeAmount(item, quantity, 'mr')}`;
+  const name = productName(item, 'mr');
+  const product = { तांदूळ: 'तांदळाच्या', साखर: 'साखरेच्या', तेल: 'तेलाचे' }[name];
+  return product ? `${product} ${describeAmount(item, quantity, 'mr')}` : `${name} — ${describeAmount(item, quantity, 'mr')}`;
 }
 
 function hindiItemAmount(item, quantity) {
-  const product = { rice: 'चावल की', sugar: 'चीनी की', oil: 'तेल के' }[item.id];
-  return `${product} ${describeAmount(item, quantity, 'hi')}`;
+  const name = productName(item, 'hi');
+  const product = { चावल: 'चावल की', चीनी: 'चीनी की', तेल: 'तेल के' }[name];
+  return product ? `${product} ${describeAmount(item, quantity, 'hi')}` : `${name} — ${describeAmount(item, quantity, 'hi')}`;
 }
 
 function describeOrder(items, locale) {
@@ -122,13 +163,17 @@ function describeOrder(items, locale) {
   }).join('. ');
 }
 
-function orderReference(text) {
-  const pattern = /\bdd[\s\u2010-\u2015-]*(\d+)\b|#\s*(\d{4,})\b|(?:\border|ऑर्डर)(?:\s+(?:id|number|no\.?|नंबर|क्रमांक))?\s+(\d{4,})\b/gu;
-  const references = [...text.matchAll(pattern)].map((match) => match[1] ?? match[2] ?? match[3]);
-  return { wrong: references.some((number) => `DD-${number}` !== ORDER_ID), rest: text.replace(pattern, ' ').trim(), found: references.length > 0 };
+function orderReference(text, id) {
+  const reference = normalize(id);
+  const explicit = /(?:\border|ऑर्डर)\s+(?:id|number|no\.?|नंबर|क्रमांक)\s*[:#]?\s*([a-z\d_.-]+)|#([a-z]*[-_]?\d[\w-]*)/gu;
+  const refs = [...text.matchAll(explicit)].map(([, named, tagged]) => (named ?? tagged).replace(/\.+$/u, ''));
+  const exact = new RegExp(boundary(escapeRegex(reference)), 'u');
+  const canStrip = /[a-z]/u.test(reference) && /[\d]/u.test(reference);
+  const command = text.replace(explicit, ' ');
+  return { wrong: refs.some(value => value !== reference), rest: (canStrip ? command.replace(exact, ' ') : command).trim(), found: refs.length > 0 || (canStrip && exact.test(command)) };
 }
 
-function clausesFor(text) {
+function clausesFor(text, mentionIds) {
   const chunks = text.split(/([;।!?]+|\.(?!\d)|,(?=\s)|\s+(?:and|but|और|लेकिन|आणि|पण|तसेच)\s+)/u);
   const clauses = [];
   for (let index = 0; index < chunks.length; index += 2) {
@@ -146,17 +191,19 @@ const basicQuestion = {
   mr: 'कोणत्या वस्तूचे प्रमाण बदलायचे आहे, आणि किती करू?',
 };
 
-export function createSession() {
+export function createSession(order, language = 'en-IN') {
+  const { history = [], ...record } = order;
+  const greetings = {
+    'en-IN': `I have order ${record.id} open. What would you like to change?`,
+    'hi-IN': `ऑर्डर ${record.id} मेरे सामने है। आप क्या बदलना चाहते हैं?`,
+    'mr-IN': `ऑर्डर ${record.id} माझ्यासमोर आहे. तुम्हाला काय बदलायचं आहे?`,
+  };
   return {
-    order: {
-      id: ORDER_ID,
-      customer: 'Shree Ganesh Kirana',
-      items: Object.entries(products).map(([id, { name, quantity, unit, status }]) => ({ id, name, quantity, unit, status })),
-    },
+    order: structuredClone(record),
     pending: null,
     focus: null,
-    history: [],
-    messages: [{ role: 'agent', text: 'Hello, Dispatch Desk. I have your order DD-2048 here. What would you like to change?', language: 'en-IN' }],
+    history: structuredClone(history),
+    messages: [{ role: 'agent', text: greetings[language], language }],
   };
 }
 
@@ -178,10 +225,12 @@ export function handleTurn(session, { text = '', language } = {}) {
   session.messages.push({ role: 'caller', text: text.trim(), language: locale });
 
   const getItem = (id) => session.order.items.find((item) => item.id === id);
+  const matcher = itemMatcher(session.order.items);
+  const mentionIds = matcher.ids;
   const noChange = () => speak(t('There’s no change waiting for confirmation. What would you like to update?', 'अभी कोई बदलाव पुष्टि के लिए बाकी नहीं है। क्या बदलना है?', 'सध्या पुष्टीसाठी कोणताही बदल बाकी नाही. काय बदलायचं आहे?'));
   const blocked = (item) => {
     const name = productName(item, key);
-    return t(`The ${name} has already shipped, so I can’t change it.`, `${name} की खेप पहले ही निकल चुकी है। उसमें अब बदलाव नहीं हो सकता।`, `${{ rice: 'तांदूळ आधीच पाठवला आहे', sugar: 'साखर आधीच पाठवली आहे', oil: 'तेल आधीच पाठवलं आहे' }[item.id]}. त्यात आता बदल करता येणार नाही.`);
+    return t(`${name} has already shipped, so I can’t change it.`, `${name} की खेप पहले ही निकल चुकी है। उसमें अब बदलाव नहीं हो सकता।`, `${name} याची खेप आधीच रवाना झाली आहे. आता बदल करता येणार नाही.`);
   };
   const clearDraft = () => { session.pending = null; session.focus = null; };
   const normalizedAnswer = input.replace(/[,.!।;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
@@ -207,10 +256,10 @@ export function handleTurn(session, { text = '', language } = {}) {
     return speak(t(`Done. The order now has ${amount} of ${name}.`, `हो गया। ऑर्डर में अब ${hindiItemAmount(item, item.quantity)} हैं।`, `झालं. ऑर्डरमध्ये आता ${marathiItemAmount(item, item.quantity)} आहेत.`));
   }
 
-  const reference = orderReference(input);
+  const reference = orderReference(input, session.order.id);
   if (reference.wrong) {
     clearDraft();
-    return speak(t('I couldn’t find that order. This desk has order DD-2048.', 'वह ऑर्डर नहीं मिला। मेरे पास ऑर्डर डी डी, दो हज़ार अड़तालीस है।', 'ती ऑर्डर सापडली नाही. माझ्याकडे डी डी, दोन हजार अठ्ठेचाळीस ही ऑर्डर आहे.'));
+    return speak(t('That reference differs from the open order. Open the correct order first.', 'यह खुले ऑर्डर का नंबर नहीं है। पहले सही ऑर्डर खोलें।', 'हा उघड्या ऑर्डरचा क्रमांक नाही. आधी योग्य ऑर्डर उघडा.'));
   }
   const command = reference.rest;
   const itemIds = mentionIds(command);
@@ -220,7 +269,7 @@ export function handleTurn(session, { text = '', language } = {}) {
     return speak(t('I can remove an item that hasn’t shipped. A full order cancellation needs the dispatch team.', 'जो सामान भेजा नहीं गया है, उसे हटा सकता हूँ। पूरा ऑर्डर रद्द करने के लिए डिस्पैच टीम से बात करनी होगी।', 'अजून न पाठवलेली वस्तू काढता येईल. पूर्ण ऑर्डर रद्द करण्यासाठी डिस्पॅच टीमशी बोलावं लागेल.'));
   }
 
-  const clauses = clausesFor(command);
+  const clauses = clausesFor(command, mentionIds);
   const plans = [];
   const unavailable = new Set();
   const unclear = new Set();
@@ -231,7 +280,7 @@ export function handleTurn(session, { text = '', language } = {}) {
 
   for (const clause of clauses) {
     const ids = mentionIds(clause);
-    const quantity = extractQuantity(clause);
+    const quantity = extractQuantity(matcher.withoutItems(clause));
     const hasQuantity = quantity.ambiguous || quantity.value !== undefined;
     const declinesItem = ids.length > 0 && !hasQuantity && /(?:नको|नहीं चाहिए|नही चाहिए)$/u.test(clause);
     const hasAction = changes.test(clause) || removes.test(clause) || addBy.test(clause) || subtractBy.test(clause) || declinesItem;
@@ -272,9 +321,13 @@ export function handleTurn(session, { text = '', language } = {}) {
       || (addBy.test(clause) && !correction.test(clause) && !/\bto\b|वर|तक/u.test(clause));
     if (removalIntent && hasQuantity && !finalQuantity.test(clause) && target >= 0) target = item.quantity - target;
     else if (delta && target >= 0) target = item.quantity + (subtractBy.test(clause) || englishDelta === 'reduce' || englishDelta === 'decrease' ? -target : target);
-    const incompatibleUnit = weights.test(clause) || (item.unit === 'bags' ? cases : bags).test(clause);
-    if (!Number.isInteger(target) || target < 0 || target > products[item.id].limit || incompatibleUnit) {
-      invalid.set(item, products[item.id].limit);
+    const unit = unitFamily(normalize(item.unit));
+    const remainder = matcher.withoutItems(clause);
+    const incompatibleUnit = (bags.test(remainder) && unit !== 'bags') || (cases.test(remainder) && unit !== 'cases') ||
+      (weights.test(remainder) && (/(?:litres?|liters?|लिटर|लीटर)/u.test(remainder) ? unit !== 'litre' : unit !== 'kg'));
+    const limit = item.limit ?? maxQuantity;
+    if (!Number.isInteger(target) || target < 0 || target > limit || incompatibleUnit) {
+      invalid.set(item, limit);
       continue;
     }
     plans.push({ itemId: item.id, name: item.name, from: item.quantity, to: target });

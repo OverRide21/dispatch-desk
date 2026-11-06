@@ -6,19 +6,19 @@
 web
 
 ## Stack
-Delegated with a preference for simplicity. Node.js 24 and native web APIs serve one responsive browser app.
+Next.js App Router and React on Node.js 24 serve a responsive browser app with SQLite storage. Native browser audio APIs handle capture and playback. Ollama with Qwen3.5 4B can style local replies.
 
 ## Users
-The example caller is a kirana shop owner who needs to change an existing wholesale order. The challenge demo audience can take the caller's role and inspect the operator view beside the conversation.
+Wholesale dispatch administrators import order records. Signed-in operators open an order and handle quantity changes with Hindi- or Marathi-speaking callers, including kirana shop owners.
 
 ## Product purpose
-Complete an allowed order change during a short Hindi or Marathi conversation. Explain any dispatch restriction, keep track of a corrected quantity, and update the order only after explicit confirmation.
+Complete an allowed order change during a short Hindi or Marathi conversation. Explain dispatch restrictions, keep track of corrected quantities, and update the order after explicit confirmation.
 
 ## Operating context
-The workspace contains fictional orders, their fulfillment state, the call transcript, and the committed change history. The prototype calls the Gnani speech APIs when configured. A sample text call exercises the same order logic.
+Administrators start with an empty workspace and upload orders from their order system. The workspace shows live order details, fulfillment state, the active conversation, and the committed change history. Gnani provides voice when configured. The typed path uses the same order logic.
 
 ## Product principles
 - Read the order state before proposing an action.
 - Speak in short turns and acknowledge corrections.
 - Make pending and saved changes easy to distinguish.
-- Use fictional orders and caller details throughout the demo.
+- Restrict access to order data and track committed changes.

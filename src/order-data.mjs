@@ -1,18 +1,13 @@
-export const ORDER_ID = 'DD-2048';
-
-export const products = {
+export const productLanguage = {
   rice: {
-    name: 'Rice', unit: 'bags', quantity: 20, status: 'pending', limit: 80,
     mr: ['तांदूळ', 'पिशवी', 'पिशव्या'], hi: ['चावल', 'बोरी', 'बोरियाँ'],
     aliases: ['rice', 'तांदूळ', 'तांदुळ', 'तांदळ', 'तांदळाचा', 'तांदळाची', 'तांदळाचे', 'तांदळाच्या', 'तांदळाला', 'तांदुळाच्या', 'तांदूळाचे', 'चावल', 'चावलों', 'चावलाची', 'चावलाच्या', 'राइस', 'राईस'],
   },
   sugar: {
-    name: 'Sugar', unit: 'bags', quantity: 8, status: 'shipped', limit: 50,
     mr: ['साखर', 'पिशवी', 'पिशव्या'], hi: ['चीनी', 'बोरी', 'बोरियाँ'],
     aliases: ['sugar', 'साखर', 'साखरेचा', 'साखरेची', 'साखरेचे', 'साखरेच्या', 'साखरेला', 'साखरचा', 'साखरची', 'चीनी', 'शक्कर', 'शकर', 'शुगर'],
   },
   oil: {
-    name: 'Cooking oil', unit: 'cases', quantity: 6, status: 'pending', limit: 30,
     mr: ['तेल', 'खोका', 'खोके'], hi: ['तेल', 'डिब्बा', 'डिब्बे'],
     aliases: ['cooking oil', 'oil', 'तेल', 'तेलाचा', 'तेलाची', 'तेलाचे', 'तेलाच्या', 'तेलाला', 'ऑइल', 'ऑयल'],
   },

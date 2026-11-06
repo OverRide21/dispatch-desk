@@ -1,155 +1,169 @@
 ---
 name: Dispatch Desk
-description: Bilingual call and order workspace for wholesale order changes
+description: A voice-first wholesale order desk with a paper order ticket
 colors:
-  primary: "#2857bf"
-  primary-hover: "#19459f"
-  rail-strong: "#22344e"
-  blue-bg: "#eef3ff"
-  active: "#106451"
-  active-bg: "#e7f5ee"
-  pending-bg: "#fff6e4"
-  pending-ink: "#795018"
-  danger: "#8c2626"
-  canvas: "#f4f6f9"
-  surface: "#fff"
-  ink: "#142336"
-  muted: "#4e6075"
-  faint: "#dce4ed"
-  rail: "#17253a"
-  rail-text: "#b8c7dc"
-  voice-stage: "#192a44"
-  button-stroke: "#cfd9e6"
-  field-stroke: "#cbd7e7"
-  on-rail: "#ffffff"
+  cream: "#fff1db"
+  paper: "#fffaf0"
+  ink: "#271710"
+  muted: "#715247"
+  line: "#dfc2ac"
+  coral: "#ff765f"
+  red: "#a62d21"
+  coral-ink: "#34140f"
+  coral-edge: "#8d3529"
+  wash: "#fae6d6"
+  pending-paper: "#ffe7ae"
+  pending-ink: "#633805"
+  saved-paper: "#e5eccd"
+  saved-ink: "#304818"
+  focus: "#95271e"
+  control-line: "#b77863"
+  language-peach: "#ffddcd"
+  caller-peach: "#ffe4d5"
+  error-peach: "#ffe2d7"
+  error-ink: "#6b2016"
 typography:
-  headline:
-    fontFamily: '"Segoe UI", "Nirmala UI", "Noto Sans Devanagari", system-ui, sans-serif'
-    fontSize: "2rem"
-    fontWeight: 740
-    lineHeight: 1.18
-    letterSpacing: "-0.036em"
-  title:
-    fontSize: "1rem"
+  display:
+    fontFamily: '"Aptos Display", "Aptos", "Segoe UI", system-ui, sans-serif'
+    fontSize: "clamp(2.45rem, 5.25vw, 4.55rem)"
+    fontWeight: 760
+    lineHeight: 0.99
+    letterSpacing: "-0.04em"
+  ticket-id:
+    fontFamily: "Georgia, serif"
+    fontSize: "clamp(1.9rem, 3vw, 2.62rem)"
     fontWeight: 700
-    letterSpacing: "-0.015em"
+    lineHeight: 1.04
+    letterSpacing: "-0.035em"
   body:
-    fontSize: "0.88rem"
-    lineHeight: 1.55
-  label:
-    fontSize: "0.73rem"
+    fontFamily: '"Aptos", "Segoe UI", "Nirmala UI", system-ui, sans-serif'
+    fontSize: "1rem"
+    lineHeight: 1.5
+  indic:
+    fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Mangal, system-ui, sans-serif'
+  turn:
+    fontSize: "0.93rem"
+    lineHeight: 1.47
+  turn-label:
+    fontSize: "0.72rem"
     fontWeight: 650
 rounded:
-  field: "6px"
+  small: "4px"
   control: "8px"
-  call-stage: "10px"
-  panel: "14px"
-  pill: "20px"
+  panel: "16px"
 spacing:
-  inline: "8px"
-  panel-inset: "20px"
-  panel-gap: "22px"
-  workspace-gutter: "34px"
+  control-gap: "0.45rem"
+  control-inset: "0.52rem 0.88rem"
+  stage-inset: "clamp(0.95rem, 2.6vw, 1.35rem)"
+  column-gap: "clamp(1rem, 2.5vw, 2rem)"
+  page-gutter: "clamp(1.25rem, 5vw, 4.5rem)"
 components:
+  microphone:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.control}"
+    padding: "0.52rem 1.03rem"
+    height: "55px"
   button-primary:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.surface}"
+    backgroundColor: "{colors.red}"
+    textColor: "{colors.paper}"
     rounded: "{rounded.control}"
-    padding: "8px 13px"
-  button-primary-hover:
-    backgroundColor: "{colors.primary-hover}"
-  button-secondary:
-    backgroundColor: "{colors.surface}"
-    textColor: "#30465f"
+    padding: "{spacing.control-inset}"
+    height: "44px"
+  button-send:
+    backgroundColor: "{colors.red}"
+    textColor: "{colors.paper}"
     rounded: "{rounded.control}"
-    padding: "8px 13px"
+    padding: "{spacing.control-inset}"
   message-field:
-    backgroundColor: "{colors.surface}"
+    backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
     rounded: "{rounded.control}"
-    padding: "8px 11px"
-  rail-nav-selected:
-    backgroundColor: "{colors.rail-strong}"
-    textColor: "{colors.on-rail}"
-    rounded: "{rounded.control}"
-    padding: "9px 10px"
-  status-editable:
-    backgroundColor: "{colors.active-bg}"
-    textColor: "#15614f"
-    rounded: "{rounded.pill}"
-    padding: "4px 8px"
-  order-panel:
-    backgroundColor: "{colors.surface}"
+    padding: "0.55rem 0.75rem"
+    height: "47px"
+  voice-stage:
+    backgroundColor: "{colors.coral}"
+    textColor: "{colors.coral-ink}"
     rounded: "{rounded.panel}"
-  pending-confirmation:
-    backgroundColor: "{colors.pending-bg}"
+    padding: "{spacing.stage-inset}"
+  order-ticket:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.panel}"
+  workspace-panel:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.panel}"
+    padding: "clamp(1rem, 3vw, 1.65rem)"
+  pending-change:
+    backgroundColor: "{colors.pending-paper}"
     textColor: "{colors.pending-ink}"
     rounded: "{rounded.control}"
-    padding: "11px 12px"
-  call-stage:
-    backgroundColor: "{colors.voice-stage}"
-    textColor: "{colors.on-rail}"
-    rounded: "{rounded.call-stage}"
-    padding: "13px 15px"
+    padding: "0.69rem 0.72rem"
+  saved-change:
+    backgroundColor: "{colors.saved-paper}"
+    textColor: "{colors.saved-ink}"
+    rounded: "{rounded.control}"
+    padding: "0.69rem 0.72rem"
 ---
 
 # Design System: Dispatch Desk
 
 ## Overview
 
-**Creative North Star: "Dispatch counter"**
+**Creative North Star: "Warm dispatch counter"**
 
-A dark navigation rail frames a cool paper workspace. The call panel carries the conversation and controls, and the order record shows the evidence for the agent’s decision. The call stage uses the same navy family as navigation and gives listening and playback a distinct place on the screen.
+The signed-in workspace starts with an order search on a paper panel. Selecting an order opens a coral call stage on cream, with the paper order ticket alongside it. Administrators can import orders and review the results before saving.
 
-A confirmed change is visible in the order quantity and the change log. Proposed quantities sit in an amber panel and keep their own visual status.
+The transcript stays in the call column. An amber proposal shows the old and proposed quantities. Once the change is confirmed, the ticket shows the saved quantity in olive and adds an entry to the change log.
 
 **Key Characteristics:**
 
-- Navy navigation and call stage with a cool paper workspace.
-- Compact type, fine borders, and line icons.
-- Distinct order states with text, color, and icons.
+- Cream canvas, coral voice stage, and paper order ticket.
+- Paper panels for sign-in, order search, and import.
+- A prominent waveform with explicit call state labels.
+- A perforated divide between the current order and the change outcome.
 
 ## Colors
 
-Dispatch blue marks the primary send action and darkens on hover. Selected navy identifies the current navigation item. Blue paper distinguishes the caller’s turns and the order-level status pill.
+Coral marks the voice stage, while deep red marks primary actions, the wordmark badge, and agent marks. Brown ink carries the primary text, with muted brown for explanations and labels. Peach differentiates caller turns from the paper agent turns.
 
-White panels sit on cool paper with fine rules between sections. Deep ink carries the main text, and muted slate marks secondary information. Error red appears on the recoverable error notice.
-
-**The Dispatch State Rule.** Use amber for a change awaiting confirmation and green for an editable line or a recorded update. Keep each state legible in text.
+**The Dispatch State Rule.** Pair amber with the pending label and olive with the saved label. The order table keeps a text label for both editable and shipped items.
 
 ## Typography
 
-Segoe UI sets the interface. Nirmala UI and Noto Sans Devanagari are the next families in the font stack for characters that need them. System sans-serif is the final fallback.
+Aptos Display leads the page heading, with red Georgia italic on its emphasized phrase. The order identifier is set in Georgia. Body copy uses Aptos with Segoe UI and Nirmala UI fallbacks. Hindi and Marathi text marked with the relevant language attribute uses Nirmala UI, Noto Sans Devanagari, then Mangal.
 
-- Workspace headings are compact and bold. The desktop heading is 2rem and becomes 1.65rem in the stacked layout.
-- Panel headings use 1rem type with a firm weight. Turn author labels use 0.73rem type. Transcript copy uses a 1.55 line height so longer Hindi and Marathi turns can wrap.
-
-**The Order Figure Rule.** Use tabular numerals for order identifiers and quantity columns.
+The page heading ranges from 2.45rem to 4.55rem on wider screens and from 2.22rem to 3rem at 480px and below. Transcript bubbles use 0.93rem type with a 1.47 line height. The ticket uses tabular figures for quantities and identifiers.
 
 ## Layout
 
-The desktop shell pairs a 208px rail with a workspace up to 1470px wide. The workspace uses a 1.38-to-1 call and order grid with a 22px gap. The call pane contains the call stage, scrollable transcript, and composer. The order column stacks the order record and change log.
+The page is up to 1280px wide and centers itself with fluid side gutters. The masthead puts the wordmark on the left and the signed-in account and sign-out control on the right. On the call page, the call stage and transcript sit in a 1.45fr left column, with a 1fr ticket column at least 20rem wide.
 
-At 1160px and below, the rail becomes 174px and workspace gutters narrow to 25px. At 930px, the rail moves into a horizontal masthead. At 680px, the work grid stacks, horizontal gutters become 13px, and the transcript viewport becomes 226px high. At 360px, some navigation and composer details condense.
+At 780px and below, the ticket follows the conversation in one column and has a jump link from the call stage. The import mapping uses three columns on desktop, two at 780px and below, and one at 480px and below. At 480px and below, the side gutter is 0.9rem, the masthead hides the account name, and the microphone control is at least 49px high. The transcript fits its content before the first turn and then scrolls within a height of `clamp(11.1rem, 27vh, 16rem)`. Desktop viewports up to 850px tall use a shorter introduction and waveform so the ready-state composer fits on screen.
 
 ## Elevation & Depth
 
-The rail and call stage use tonal separation. Workspace panels have a fine stroke and a low shadow (`0 2px 6px #172c4710`). The active rail item uses an inset rule for definition.
+The stage, ticket, and workspace panels sit on the canvas with solid fills and fine outlines. Color and a dashed perforation distinguish ticket sections.
 
 ## Shapes
 
-Panels use a 14px radius. The call stage uses 10px, buttons and the message field use 8px, and the language selector uses 6px. Status chips use fully rounded ends. Line icons use round caps and joins.
+The stage, order ticket, and workspace panels use 16px corners. Buttons and form fields use 8px corners. Transcript bubbles use asymmetric 3px and 9px corners to indicate the speaker. The order ticket has semicircular cutouts at both ends of the dashed rule.
 
 ## Components
 
-- **Buttons and fields.** The send action uses dispatch blue. Reset uses a white fill and a fine stroke. The message field pairs with the language selector above it. Keyboard focus uses a 3px outline with a 3px offset. Dispatch blue marks focus on light surfaces, and a lighter blue marks focus on the rail and call stage.
-- **Navigation.** Links pair a line icon with a text label. The current item uses the selected navy surface and inset rule. At smaller widths, links wrap within the masthead.
-- **Call stage.** The stage pairs a small waveform with voice status and the call control. Speaking animates the waveform, listening changes its color, and reduced-motion preferences shorten animations and transitions.
-- **Transcript.** Caller turns align right in blue paper, and agent turns align left in a light neutral surface. Each turn names its speaker and wraps within the transcript width.
-- **Order record.** A compact table keeps quantity and dispatch columns distinct. Shipped rows carry a lock icon and a Shipped label. The pending area uses a dashed outline when empty and a solid amber treatment when a proposal awaits confirmation.
+- **Sign-in and order search.** Paper panels hold labeled fields and full-width order rows. Each row shows the order reference, customer, and line count. Empty order lists and searches have separate guidance.
+- **Import.** The administrator panel offers CSV, Excel, and JSON templates. After choosing a file, review the worksheet and column mapping when applicable. The preview labels new, updated, unchanged, and conflicting orders and shows validation errors before the save action.
+- **Voice stage.** A coral field holds a state label, language selector, waveform, and microphone control. Listening and interruption respond to input level. Speaking animates the waveform. Opening the microphone, checking an order, connecting, and text support use explicit labels. The waveform is decorative for assistive technology.
+- **Controls.** The microphone uses brown ink with paper text, then inverts when the call is active. Deep red marks Send, Sign in, Import orders, and Confirm change. Back to orders and Sign out use outlined controls. Keyboard focus uses a 2px red outline with 4px offset on light surfaces and brown ink on coral.
+- **Transcript and composer.** Caller turns align right with a peach fill. Agent turns align left beside the dispatch mark. Every turn names its speaker. The typed input sits below the transcript. Confirm change appears when there is a pending proposal. Recoverable errors appear in a peach notice.
+- **Order ticket.** The order identifier and customer precede the quantity and dispatch columns. The perforation separates the table from the proposal or saved result. The outcome shows Before and Proposed or Saved together, with a label and icon. The change log lists confirmed edits and their times.
+- **Reduced motion.** The reduced-motion query shortens transitions and animations and disables smooth scrolling.
 
 ## Do's and Don'ts
 
-- Do group the draft quantity and the confirmation instruction inside the pending panel.
-- Do keep turn labels and the language selector visible in the call workspace.
-- Do preserve the same status words in narrow layouts.
+- Do keep the microphone close to the call state and the typed composer below the transcript.
+- Do show the import preview and validation errors before saving orders.
+- Do show the previous and proposed or saved quantities together.
+- Do retain text labels when color signals an order or call state.
+- Don't remove language attributes from Hindi and Marathi transcript text.

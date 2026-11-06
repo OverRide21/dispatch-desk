@@ -1,47 +1,49 @@
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
-import { createServer } from 'node:http';
 import test from 'node:test';
-import { createDispatchServer } from '../server.mjs';
+import { createDispatchHandlers } from '../src/http.mjs';
+import { actor, fixtureStore, orderId } from './order-fixture.mjs';
 
-async function serve(server, context) {
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  context.after(() => new Promise((resolve) => server.close(resolve)));
-  return `http://127.0.0.1:${server.address().port}`;
-}
+const provider = 'http://gnani.test';
+const dispatch = 'http://dispatch.test';
+const audioChunk = 'event: chunk\ndata: {"audio":"AQIDBA==","is_final":false}\n\n';
 
-test('voice routes forward audio, preserve detected language and stream PCM', async (context) => {
+test('voice routes keep the selected language through transcription and playback', async (context) => {
   const calls = [];
-  const provider = await serve(createServer(async (request, response) => {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const body = Buffer.concat(chunks);
-    const { url, headers } = request;
-    if (url === '/stt/v3') {
-      const envelope = new Request('http://localhost/mock', { method: 'POST', headers, body });
-      const form = await envelope.formData();
+  let audioSignal;
+  let behavior;
+  context.mock.method(globalThis, 'fetch', async (url, options) => {
+    const request = new Request(url, options);
+    const target = new URL(request.url);
+    assert.equal(target.origin, provider);
+    const key = request.headers.get('x-api-key-id');
+    if (target.pathname === '/stt/v3') {
+      const form = await request.formData();
       calls.push({
-        path: url, key: headers['x-api-key-id'], language: form.get('language_code'),
+        path: target.pathname, key, language: form.get('language_code'),
         audio: Buffer.from(await form.get('audio_file').arrayBuffer()),
       });
-      response.setHeader('Content-Type', 'application/json');
-      return response.end(JSON.stringify({ success: true, transcript: 'तांदूळ दहा करा', detected_language_code: 'mr-IN' }));
+      return Response.json({ success: true, transcript: 'तांदूळ दहा करा', detected_language_code: 'hi-IN' });
     }
-    const payload = JSON.parse(body);
-    calls.push({ path: url, key: headers['x-api-key-id'], text: payload.text, language: payload.language });
-    if (payload.text === 'Rate limit') {
-      response.writeHead(429);
-      return response.end();
+    assert.equal(target.pathname, '/api/v1/tts/sse');
+    const payload = await request.json();
+    calls.push({ path: target.pathname, key, text: payload.text, language: payload.language });
+    if (behavior === 'rate') return new Response(null, { status: 429 });
+    const headers = { 'Content-Type': 'text/event-stream' };
+    if (behavior === 'interrupt') {
+      audioSignal = request.signal;
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(audioChunk));
+          request.signal.addEventListener('abort', () => controller.error(request.signal.reason), { once: true });
+        },
+      });
+      return new Response(body, { headers });
     }
-    response.setHeader('Content-Type', 'text/event-stream');
-    response.write('event: start\ndata: {}\n\n');
-    response.write('event: chunk\ndata: {"audio":"AQIDBA==","is_final":false}\n\n');
-    response.end('event: complete\ndata: {"is_final":true}\n\n');
-  }), context);
+    return new Response('event: start\ndata: {}\n\n' + audioChunk + 'event: complete\ndata: {"is_final":true}\n\n', { headers });
+  });
 
-  const dispatch = await serve(createDispatchServer(), context);
-  const open = () => fetch(dispatch + '/api/session').then((response) => response.json());
+  const handlers = createDispatchHandlers({ store: fixtureStore(context), identify: () => actor });
+  const open = async () => (await handlers.session(new Request(dispatch + '/api/session?orderId=' + orderId + '&language=mr-IN'))).json();
   const original = {
     GNANI_API_KEY: process.env.GNANI_API_KEY,
     GNANI_BASE_URL: process.env.GNANI_BASE_URL,
@@ -56,11 +58,13 @@ test('voice routes forward audio, preserve detected language and stream PCM', as
   delete process.env.GNANI_API_KEY;
   const initial = await open();
   assert.equal(initial.voiceEnabled, false);
+  assert.equal(initial.messages[0].language, 'mr-IN');
+  assert.match(initial.messages[0].text, /तुम्हाला/);
   const sessionHeaders = { 'X-Session-Id': initial.sessionId };
-  const speak = (text) => fetch(dispatch + '/api/voice/speak', {
+  const speak = (text) => handlers.speak(new Request(dispatch + '/api/voice/speak', {
     method: 'POST', headers: { ...sessionHeaders, 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, language: 'mr-IN' }),
-  });
+  }));
   assert.equal((await speak('नमस्कार')).status, 503);
 
   process.env.GNANI_API_KEY = 'test-credential';
@@ -81,22 +85,38 @@ test('voice routes forward audio, preserve detected language and stream PCM', as
   wav.writeUInt16LE(16, 34);
   wav.write('data', 36);
   wav.writeUInt32LE(2, 40);
-  const transcribed = await fetch(dispatch + '/api/voice/transcribe', {
+  const transcribe = (audio) => handlers.transcribe(new Request(dispatch + '/api/voice/transcribe', {
     method: 'POST',
-    headers: { ...sessionHeaders, 'Content-Type': 'audio/wav', 'X-Language': 'indic-auto' },
-    body: wav,
-  });
+    headers: { ...sessionHeaders, 'Content-Type': 'audio/wav', 'X-Language': 'mr-IN' },
+    body: audio,
+  }));
+  assert.equal((await transcribe(new Uint8Array(44))).status, 400);
+  const transcribed = await transcribe(wav);
   assert.equal(transcribed.status, 200);
   assert.deepEqual(await transcribed.json(), { text: 'तांदूळ दहा करा', language: 'mr-IN' });
 
-  const spoken = await speak('दहा पिशव्या करू का?');
+  const turn = await handlers.turn(new Request(dispatch + '/api/turn', {
+    method: 'POST', headers: { ...sessionHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'तांदूळ दहा करा', language: 'mr-IN' }),
+  })).then(r => r.json());
+  assert.equal((await speak('An unrelated phrase')).status, 409);
+  const spoken = await speak(turn.reply);
   assert.equal(spoken.status, 200);
   assert.equal(spoken.headers.get('content-type'), 'audio/pcm');
   assert.equal(spoken.headers.get('x-sample-rate'), '24000');
   assert.deepEqual(Buffer.from(await spoken.arrayBuffer()), Buffer.from([1, 2, 3, 4]));
   assert.deepEqual(calls, [
-    { path: '/stt/v3', key: 'test-credential', language: 'indic-auto', audio: wav },
-    { path: '/api/v1/tts/sse', key: 'test-credential', language: 'mr-IN', text: 'दहा पिशव्या करू का?' },
+    { path: '/stt/v3', key: 'test-credential', language: 'mr-IN', audio: wav },
+    { path: '/api/v1/tts/sse', key: 'test-credential', language: 'mr-IN', text: turn.reply },
   ]);
-  assert.equal((await speak('Rate limit')).status, 429);
+  behavior = 'rate';
+  assert.equal((await speak(turn.reply)).status, 429);
+
+  behavior = 'interrupt';
+  const playing = await speak(turn.reply);
+  const reader = playing.body.getReader();
+  const first = await reader.read();
+  assert.deepEqual(Buffer.from(first.value), Buffer.from([1, 2, 3, 4]));
+  await reader.cancel();
+  assert.ok(audioSignal.aborted, 'interrupting playback cancels the upstream provider request');
 });

@@ -200,6 +200,7 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
   }
 
   function startListening(language = 'indic-auto') {
+    if (language !== inputLanguage) resetDetection();
     inputLanguage = language;
     if (mic) return Promise.resolve();
     if (starting) return starting;
