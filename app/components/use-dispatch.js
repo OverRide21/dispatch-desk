@@ -18,6 +18,7 @@ const initial = {
   busy: false,
   error: null,
   notice: '',
+  replyProvider: null,
   replySource: null,
 };
 
@@ -44,7 +45,9 @@ function createDesk(render, meter, orderId, onUnauthorized) {
 
   function applySnapshot(session) {
     sessionId = session.sessionId;
-    update({ session, replySource: session.replySource ?? null });
+    const preferred = model.replyProvider ?? readPreference('dispatch-desk-reply-provider');
+    const replyProvider = session.replyProviders.includes(preferred) ? preferred : session.replyProviders[0];
+    update({ session, replyProvider, replySource: session.replySource ?? null });
   }
 
   function report(error, area) {
@@ -68,6 +71,7 @@ function createDesk(render, meter, orderId, onUnauthorized) {
   }
 
   async function request(path, data) {
+    const timeoutMs = data?.replyProvider === 'ollama-dhee' ? 55_000 : 15_000;
     const headers = new Headers();
     if (sessionId) headers.set('X-Session-Id', sessionId);
     if (data !== undefined) headers.set('Content-Type', 'application/json');
@@ -79,7 +83,7 @@ function createDesk(render, meter, orderId, onUnauthorized) {
       headers,
       body: data === undefined ? undefined : JSON.stringify(data),
       cache: 'no-store',
-      signal: AbortSignal.any([lifecycle.signal, AbortSignal.timeout(15_000)]),
+      signal: AbortSignal.any([lifecycle.signal, AbortSignal.timeout(timeoutMs)]),
     });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body) {
@@ -101,6 +105,12 @@ function createDesk(render, meter, orderId, onUnauthorized) {
     }
   }
 
+  function setReplyProvider(replyProvider) {
+    if (model.busy || !model.session?.replyProviders.includes(replyProvider)) return;
+    savePreference('dispatch-desk-reply-provider', replyProvider);
+    update({ replyProvider });
+  }
+
   function stopPlayback() {
     playbackVersion += 1;
     voice?.stopSpeaking();
@@ -113,16 +123,16 @@ function createDesk(render, meter, orderId, onUnauthorized) {
     meter.current?.style.removeProperty('--voice-level');
   }
 
-  async function submit(text, source = 'typed') {
+  async function submit(text, source = 'typed', itemAction) {
     const message = text.trim();
     if (!message || !model.session || model.busy ||
       (source !== 'voice' && (model.startingMic || model.audioState === 'processing'))) return false;
     if (source !== 'voice') stopPlayback();
     const version = playbackVersion;
     const language = model.language;
-    update({ busy: true, error: null, notice: 'Checking the order.' });
+    update({ busy: true, error: null, notice: model.replyProvider === 'ollama-dhee' ? 'Waiting for Dhee.' : 'Checking the order.' });
     try {
-      const session = await request('/api/turn', { text: message, language });
+      const session = await request('/api/turn', { text: message, language, replyProvider: model.replyProvider, itemAction });
       applySnapshot(session);
       update({ notice: 'Response received.' });
       if (model.callActive && version === playbackVersion && session.reply) {
@@ -135,6 +145,15 @@ function createDesk(render, meter, orderId, onUnauthorized) {
     } finally {
       update({ busy: false });
     }
+  }
+
+  function proposeItem(itemAction) {
+    const { type, name, quantity, unit } = itemAction;
+    const language = model.language;
+    const messages = type === 'add'
+      ? { 'en-IN': `Add ${quantity} ${unit} of ${name}.`, 'hi-IN': `${name} जोड़ें (${quantity} ${unit})।`, 'mr-IN': `${name} टाका (${quantity} ${unit}).` }
+      : { 'en-IN': `Remove ${name}.`, 'hi-IN': `${name} हटाएँ।`, 'mr-IN': `${name} काढा.` };
+    return submit(messages[language], 'typed', itemAction);
   }
 
   async function connect() {
@@ -191,7 +210,7 @@ function createDesk(render, meter, orderId, onUnauthorized) {
   }
 
   return {
-    connect, submit, setLanguage, toggleVoice, endVoice,
+    connect, submit, proposeItem, setLanguage, setReplyProvider, toggleVoice, endVoice,
     dispose() {
       lifecycle.abort();
       voice?.dispose();

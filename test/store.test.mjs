@@ -17,42 +17,42 @@ const order = {
 const workspace = 'warehouse-1';
 const actor = 'warehouse-admin';
 
-function importOrder(store, value = order, area = workspace) {
-  const preview = store.previewImport(area, actor, [value]);
+async function importOrder(store, value = order, area = workspace) {
+  const preview = await store.previewImport(area, actor, [value]);
   return store.commitImport(area, actor, preview.importId);
 }
 
-test('empty SQLite store persists confirmed edits and confines reads to one workspace', () => {
+test('empty SQLite store persists confirmed edits and confines reads to one workspace', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'dispatch-store-'));
   const path = join(folder, 'orders.sqlite');
   let store;
   try {
-    store = createStore(path);
-    assert.deepEqual(store.listOrders(workspace), []);
-    assert.equal(importOrder(store).counts.created, 1);
-    const before = store.getOrder(workspace, order.id);
+    store = await createStore(path);
+    assert.deepEqual(await store.listOrders(workspace), []);
+    assert.equal((await importOrder(store)).counts.created, 1);
+    const before = await store.getOrder(workspace, order.id);
     assert.equal(before.items[0].nameHi, 'चावल');
     assert.deepEqual(before.items[0].aliases, ['तांदूळ']);
-    assert.deepEqual(store.listOrders(workspace, { query: 'ganesh' }), [
+    assert.deepEqual(await store.listOrders(workspace, { query: 'ganesh' }), [
       { id: order.id, customer: order.customer, revision: before.revision, itemCount: 2 },
     ]);
-    assert.equal(store.getOrder('another-warehouse', order.id), null);
-    assert.throws(() => store.saveQuantity(workspace, order.id, {
+    assert.equal(await store.getOrder('another-warehouse', order.id), null);
+    await assert.rejects(store.saveQuantity(workspace, order.id, {
       itemId: 'SUGAR-1', quantity: 7, revision: before.revision, actor,
     }), { code: 'line-shipped', status: 409 });
 
-    store.saveQuantity(workspace, order.id, { itemId: 'RICE-1', quantity: 10, revision: before.revision, actor });
+    await store.saveQuantity(workspace, order.id, { itemId: 'RICE-1', quantity: 10, revision: before.revision, actor });
     store.close();
     store = undefined;
-    store = createStore(path);
-    const saved = store.getOrder(workspace, order.id);
+    store = await createStore(path);
+    const saved = await store.getOrder(workspace, order.id);
     assert.equal(saved.revision, before.revision + 1);
     assert.equal(saved.items[0].quantity, 10);
     assert.equal(saved.items[1].quantity, 8);
     assert.equal(saved.history.length, 1);
     assert.equal(saved.history[0].actor, actor);
     assert.deepEqual([saved.history[0].from, saved.history[0].to], [20, 10]);
-    assert.throws(() => store.saveQuantity(workspace, order.id, {
+    await assert.rejects(store.saveQuantity(workspace, order.id, {
       itemId: 'RICE-1', quantity: 12, revision: before.revision, actor,
     }), { code: 'order-stale', status: 409 });
   } finally {
@@ -62,19 +62,19 @@ test('empty SQLite store persists confirmed edits and confines reads to one work
   }
 });
 
-test('import preview is idempotent and does not delete omitted lines', t => {
-  const store = createStore(':memory:');
+test('import preview is idempotent and does not delete omitted lines', async t => {
+  const store = await createStore(':memory:');
   t.after(() => store.close());
-  const preview = store.previewImport(workspace, actor, [order]);
-  assert.equal(store.getOrder(workspace, order.id), null);
-  assert.throws(() => store.commitImport(workspace, 'other-user', preview.importId), { code: 'import-not-found' });
-  assert.deepEqual(store.commitImport(workspace, actor, preview.importId), preview);
-  assert.deepEqual(store.commitImport(workspace, actor, preview.importId), preview);
-  assert.equal(importOrder(store).counts.unchanged, 1);
+  const preview = await store.previewImport(workspace, actor, [order]);
+  assert.equal(await store.getOrder(workspace, order.id), null);
+  await assert.rejects(store.commitImport(workspace, 'other-user', preview.importId), { code: 'import-not-found' });
+  assert.deepEqual(await store.commitImport(workspace, actor, preview.importId), preview);
+  assert.deepEqual(await store.commitImport(workspace, actor, preview.importId), preview);
+  assert.equal((await importOrder(store)).counts.unchanged, 1);
 
   const update = { ...order, items: [{ ...order.items[0], quantity: 12 }] };
-  assert.equal(importOrder(store, update).counts.updated, 1);
-  const saved = store.getOrder(workspace, order.id);
+  assert.equal((await importOrder(store, update)).counts.updated, 1);
+  const saved = await store.getOrder(workspace, order.id);
   assert.equal(saved.items.length, 2);
   assert.equal(saved.items[0].quantity, 12);
   assert.equal(saved.items[1].quantity, 8);
@@ -82,26 +82,26 @@ test('import preview is idempotent and does not delete omitted lines', t => {
   assert.equal(saved.history[0].to, 12);
 });
 
-test('import conflict or revision drift rejects the complete batch', t => {
-  const store = createStore(':memory:');
+test('import conflict or revision drift rejects the complete batch', async t => {
+  const store = await createStore(':memory:');
   t.after(() => store.close());
-  importOrder(store);
+  await importOrder(store);
   const update = { ...order, items: [{ ...order.items[0], quantity: 12 }] };
   const newOrder = { ...order, id: 'ORDER-28' };
-  const preview = store.previewImport(workspace, actor, [newOrder, update]);
-  const live = store.getOrder(workspace, order.id);
-  store.saveQuantity(workspace, order.id, { itemId: 'RICE-1', quantity: 9, revision: live.revision, actor });
-  assert.throws(() => store.commitImport(workspace, actor, preview.importId), { code: 'import-stale' });
-  assert.equal(store.getOrder(workspace, newOrder.id), null);
-  assert.equal(store.getOrder(workspace, order.id).items[0].quantity, 9);
+  const preview = await store.previewImport(workspace, actor, [newOrder, update]);
+  const live = await store.getOrder(workspace, order.id);
+  await store.saveQuantity(workspace, order.id, { itemId: 'RICE-1', quantity: 9, revision: live.revision, actor });
+  await assert.rejects(store.commitImport(workspace, actor, preview.importId), { code: 'import-stale' });
+  assert.equal(await store.getOrder(workspace, newOrder.id), null);
+  assert.equal((await store.getOrder(workspace, order.id)).items[0].quantity, 9);
 
   const shippedUpdate = { ...order, items: [{ ...order.items[1], quantity: 7 }] };
-  const conflict = store.previewImport(workspace, actor, [newOrder, shippedUpdate]);
+  const conflict = await store.previewImport(workspace, actor, [newOrder, shippedUpdate]);
   assert.equal(conflict.counts.conflicts, 1);
   assert.equal(conflict.changes[1].status, 'conflict');
-  assert.throws(() => store.commitImport(workspace, actor, conflict.importId), { code: 'import-conflict' });
-  assert.equal(store.getOrder(workspace, newOrder.id), null);
-  assert.equal(store.getOrder(workspace, order.id).items[1].quantity, 8);
+  await assert.rejects(store.commitImport(workspace, actor, conflict.importId), { code: 'import-conflict' });
+  assert.equal(await store.getOrder(workspace, newOrder.id), null);
+  assert.equal((await store.getOrder(workspace, order.id)).items[1].quantity, 8);
 });
 
 test('local requests use the loopback Host when Next normalizes the request URL', t => {
@@ -124,7 +124,7 @@ test('local requests use the loopback Host when Next normalizes the request URL'
 });
 
 test('operator sign-in scopes cookies and rejects wrong credentials, cross-origin use, and revoked tokens', async t => {
-  const store = createStore(':memory:');
+  const store = await createStore(':memory:');
   t.after(() => store.close());
   const settings = {
     DISPATCH_ADMIN_USERNAME: actor,
@@ -165,11 +165,11 @@ test('operator sign-in scopes cookies and rejects wrong credentials, cross-origi
   assert.match(cookie, /HttpOnly; SameSite=Strict; Secure/);
   const headers = { Cookie: cookie.split(';')[0], Origin: 'https://dispatch.example' };
   const request = new Request('https://dispatch.example/api/orders', { headers });
-  const session = authenticate(request, store);
+  const session = await authenticate(request, store);
   assert.equal(session.workspaceId, workspace);
   assert.equal(session.role, 'operator');
-  assert.equal(authLogout(new Request('https://dispatch.example/api/auth/logout', { method: 'POST', headers }), store).status, 200);
-  assert.equal(authenticate(request, store), null);
+  assert.equal((await authLogout(new Request('https://dispatch.example/api/auth/logout', { method: 'POST', headers }), store)).status, 200);
+  assert.equal(await authenticate(request, store), null);
   delete process.env.DISPATCH_ADMIN_PASSWORD;
   assert.equal(authConfigured(), false);
   assert.equal((await login(actor, settings.DISPATCH_ADMIN_PASSWORD)).status, 503);

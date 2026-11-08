@@ -18,7 +18,6 @@ const columns = [
 ];
 
 const formatNames = { csv: 'CSV', xlsx: 'Excel', json: 'JSON' };
-const maxFileBytes = 5 * 1024 * 1024;
 
 function uploadRequest(phase, file, { sheet, mapping } = {}) {
   const query = new URLSearchParams({ phase });
@@ -63,7 +62,8 @@ function ImportPreview({ report }) {
   );
 }
 
-export default function OrderImport({ onComplete, onUnauthorized }) {
+export default function OrderImport({ maxFileBytes = 5 * 1024 * 1024, onComplete, onUnauthorized }) {
+  const maxFileSize = `${maxFileBytes / (1024 * 1024)} MiB`;
   const [file, setFile] = useState(null);
   const [inspection, setInspection] = useState(null);
   const [mapping, setMapping] = useState({});
@@ -105,7 +105,7 @@ export default function OrderImport({ onComplete, onUnauthorized }) {
     setFile(null);
     if (!selected) return;
     if (selected.size > maxFileBytes) {
-      setError('Choose a file no larger than 5 MB.');
+      setError(`Choose a file no larger than ${maxFileSize}.`);
       return;
     }
     setFile(selected);
@@ -146,7 +146,7 @@ export default function OrderImport({ onComplete, onUnauthorized }) {
   return (
     <section className="workspace-panel import-panel" aria-labelledby="import-title">
       <div className="import-heading">
-        <div><h2 id="import-title">Import orders</h2><p className="workspace-hint">Choose a CSV, Excel, or JSON file up to 5 MB.</p></div>
+        <div><h2 id="import-title">Import orders</h2><p className="workspace-hint">Choose a CSV, Excel, or JSON file up to {maxFileSize}.</p></div>
         <nav className="template-links" aria-label="Download import templates">
           {Object.entries(formatNames).map(([format, label]) => (
             <a key={format} href={`/api/imports/template?format=${format}`} download>{label} template</a>

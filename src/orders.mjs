@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { productLanguage, quantities, quantityAliases } from './order-data.mjs';
 
 const localeKeys = { 'en-IN': 'en', 'hi-IN': 'hi', 'mr-IN': 'mr' };
@@ -12,9 +13,17 @@ for (const language of Object.values(quantities)) {
 }
 const numberPattern = [...numberWords.keys()].sort((a, b) => b.length - a.length)
   .map((word) => escapeRegex(word).replaceAll(' ', '[ -]')).join('|');
-const numberRegex = new RegExp(boundary(`[+-]?\\d+(?:,\\d{3})+(?:\\.\\d+)?|[+-]?\\d+(?:\\.\\d+)?|${numberPattern}`), 'gu');
+const spokenMinus = '(?:minus|negative|उणे|ऋण|माइनस|मायनस) ';
+const negativeAmount = new RegExp(`^${spokenMinus}`, 'u');
+const numberRegex = new RegExp(boundary(`(?:${spokenMinus})?(?:[+-]?\\d+(?:,\\d{3})+(?:\\.\\d+)?|[+-]?\\d+(?:\\.\\d+)?|${numberPattern})`), 'gu');
 
 const reads = phrases(['status', 'track', 'show', 'list', 'where is', 'where are', 'what is', 'how many', 'has shipped', 'already shipped', 'कितना', 'कितनी', 'कितने', 'कहाँ', 'कहां', 'स्टेटस', 'स्थिति', 'दिखाओ', 'पहुंचा', 'किती', 'कुठे', 'काय आहे', 'दाखवा', 'आली का', 'आले का', 'आला का', 'निघाली का', 'निघाले का', 'पाठवला का', 'तपासा', 'चेक करो', 'पाठवलं आहे', 'भेजा गया है', 'जानकारी', 'माहिती']);
+const orderScope = phrases(['order', 'orders', 'shipment', 'dispatch', 'ऑर्डर', 'ऑर्डरची', 'ऑर्डरचा', 'ऑर्डरचे', 'ऑर्डरमध्ये', 'ऑर्डरमधून', 'खेप']);
+const shippingStatus = phrases(['shipped', 'dispatched', 'was sent', 'has been sent', 'रवाना', 'पाठवला', 'पाठवली', 'पाठवले', 'पाठवलं', 'निघाली', 'निघाले', 'भेजा', 'भेजी', 'भेज दी']);
+const itemStatus = phrases(['status', 'track', 'how many', 'quantity', 'किती', 'कितना', 'कितनी', 'कितने', 'स्टेटस', 'स्थिति', 'माहिती', 'जानकारी']);
+const editScope = phrases(['change', 'update', 'modify', 'adjust', 'quantity', 'बदल', 'बदलायचं', 'बदलायचे', 'बदलायची', 'बदलना', 'बदलाव', 'प्रमाण', 'मात्रा', 'संख्या']);
+const generalQuestion = phrases(['how do i', 'how can i', 'what is', 'what are', 'why', 'कसा', 'कशी', 'कसे', 'कैसे', 'क्यों']);
+const quickStatus = /^(?:status|track|show items|list items|what has shipped|what was shipped|what was dispatched|काय पाठवलं आहे|क्या भेजा गया है|स्टेटस|स्थिति)[.!?।]*$/u;
 const changes = phrases(['change', 'modify', 'update', 'set', 'make', 'reduce', 'increase', 'decrease', 'add', 'edit', 'instead', 'बदल', 'बदलो', 'बदलना', 'बदलून', 'बदला', 'कर', 'करा', 'करू', 'कीजिए', 'कीजिये', 'करना', 'कर दें', 'कर दीजिए', 'ठेवा', 'करायचं', 'ऐवजी', 'एवजी', 'जगह', 'बजाय', 'वाढवा', 'घटवा', 'टाका', 'जोड़ो', 'बढ़ाओ', 'घटा दो']);
 const removes = phrases(['cancel', 'remove', 'delete', 'drop', 'काढा', 'काढून', 'हटा', 'हटाओ', 'निकाल', 'निकालो', 'रद्द', 'कैंसल', 'कॅन्सल', 'कॅन्सल करा', 'कॅसल']);
 const addBy = phrases(['add', 'increase by', 'more', 'और डालो', 'और जोड़ो', 'आणखी', 'अजून', 'ने वाढवा', 'और बढ़ाओ', 'जोड़ो', 'टाका']);
@@ -25,11 +34,39 @@ const negative = phrases(['not', 'no', 'नाही', 'नहीं', 'नह�
 const correction = phrases(['instead', 'rather', 'actually', 'sorry', 'i mean', 'ऐवजी', 'एवजी', 'वरून', 'बजाय', 'की जगह', 'की बजाय', 'मतलब', 'म्हणजे']);
 const fromTo = /\bfrom\b.*\bto\b/u;
 const largeAmount = phrases(['hundred', 'thousand', 'million', 'lakh', 'crore', 'हजार', 'हज़ार', 'लाख', 'करोड़', 'कोटी']);
-const weights = phrases(['kg', 'kilo', 'kilos', 'kilogram', 'kilograms', 'litre', 'litres', 'liter', 'liters', 'किलो', 'किलोग्राम', 'लिटर', 'लीटर']);
-const bags = phrases(['bag', 'bags', 'sack', 'sacks', 'पिशवी', 'पिशव्या', 'बोरी', 'बोरियाँ']);
-const cases = phrases(['case', 'cases', 'box', 'boxes', 'खोका', 'खोके', 'बॉक्स', 'केस', 'डिब्बा', 'डिब्बे']);
 const doNotChange = /^(?:please )?(?:don['’]t|do not|नको|मत)\s|(?:काढू नका|रद्द करू नका|बदलू नका|करू नका|मत करो|मत करना|मत हटाओ|मत हटाना|मत निकालो)(?:\s|$)/u;
 const wholeOrderCancel = /\b(?:cancel|delete)\s+(?:the\s+|my\s+|this\s+|whole\s+|entire\s+)*order\b|(?:ऑर्डर\s*(?:को\s*)?|सगळं\s+|सब\s+)(?:रद्द|कैंसल|कॅन्सल|काढा)/u;
+const addStart = /^(?:please\s+)?add\s+/u;
+const addEnd = /\s+(?:जोड़ दो|जोड़ दीजिए|जोड़ें|जोड़ो|डाल दो|डाल दीजिए|डालो|जोडा|टाका|घाला|समाविष्ट करा)$/u;
+const unitWords = {
+  bags: ['bag', 'bags', 'sack', 'sacks', 'बोरियाँ', 'बोरियां', 'बोरी', 'पिशव्या', 'पिशवी'],
+  boxes: ['box', 'boxes', 'case', 'cases', 'बॉक्स', 'केस', 'खोके', 'खोका', 'डिब्बे', 'डिब्बा'],
+  kg: ['kg', 'kilo', 'kilos', 'kilogram', 'kilograms', 'किलो', 'किलोग्राम'],
+  litres: ['litre', 'litres', 'liter', 'liters', 'लिटर', 'लीटर'],
+  pieces: ['piece', 'pieces', 'unit', 'units', 'पीस', 'नग'],
+  bottles: ['bottle', 'bottles', 'बोतलें', 'बोतल', 'बाटल्या', 'बाटली'],
+  packets: ['packet', 'packets', 'पैकेट', 'पॅकेट'],
+};
+const unitMentions = Object.entries(unitWords).map(([unit, words]) => [unit, phrases(words)]);
+const itemUnits = new Map(unitMentions.map(([unit, pattern]) => [unit, new RegExp(`^${pattern.source}(?=\\s|$)`, 'u')]));
+
+function spokenAddition(text) {
+  if (!addStart.test(text) && !addEnd.test(text.replace(/[।.!?]+$/u, ''))) return null;
+  const content = text.replace(/[।.!?]+$/u, '').replace(addStart, '').replace(addEnd, '')
+    .replace(/^(?:ऑर्डर\s+(?:में|मध्ये|मधे)\s+)|(?:\s+to (?:the |my )?order|\s+ऑर्डर(?:मध्ये|मधे| में))$/u, '').trim();
+  if (/[,;!?।]|(?:^|\s)(?:and|but|और|लेकिन|आणि|पण|या|किंवा|नको|नाही|नहीं|मत|not|or|instead|ऐवजी|बजाय)(?=\s|$)/u.test(content)) return null;
+  for (const number of content.matchAll(numberRegex)) {
+    const quantity = extractQuantity(number[0]).value;
+    const after = content.slice(number.index + number[0].length).trimStart();
+    const unit = [...itemUnits].find(([, pattern]) => pattern.test(after));
+    if (!unit) continue;
+    const before = content.slice(0, number.index).trim().replace(/(?:\s+|^)(?:के|की|का|चे|च्या)$/u, '').trim();
+    const following = after.replace(unit[1], '').trim().replace(/^(?:of\s+|के\s+|की\s+|का\s+)/u, '');
+    if (before && following) return null;
+    return { type: 'add', name: before || following, quantity, unit: unit[0] };
+  }
+  return null;
+}
 
 const confirmation = new Set([
   'yes', 'yep', 'yeah', 'confirm', 'confirmed', 'yes confirm', 'go ahead', 'yes go ahead', 'please go ahead', 'go ahead please', 'do it', 'yes do it', 'apply it', 'please apply it', 'apply the change', 'confirm the change', 'yes please', 'yes change it', 'confirm it', 'save it', 'save the change',
@@ -61,7 +98,11 @@ function isQuantityWord(text, word, index) {
 function extractQuantity(text) {
   if (largeAmount.test(text)) return { value: Infinity };
   const matches = [...text.matchAll(numberRegex)].filter((match) => isQuantityWord(text, match[0], match.index));
-  const values = matches.map((match) => numberWords.get(match[0].replaceAll('-', ' ')) ?? Number(match[0].replaceAll(',', '')));
+  const values = matches.map(([raw]) => {
+    const amount = raw.replace(negativeAmount, '');
+    const value = numberWords.get(amount.replaceAll('-', ' ')) ?? Number(amount.replaceAll(',', ''));
+    return amount === raw ? value : -Math.abs(value);
+  });
   if (!values.length) return {};
   if (values.length === 1) {
     const [number] = matches;
@@ -90,6 +131,11 @@ function languageInfo(item) {
   return Object.values(productLanguage).find((product) => product.aliases.includes(name));
 }
 
+function matchesItemName(item, name) {
+  return [item.name, item.sku, item.nameHi, item.nameMr, ...(item.aliases ?? []), ...(languageInfo(item)?.aliases ?? [])]
+    .some(alias => alias && normalize(alias) === name);
+}
+
 function itemMatcher(items) {
   const idsByAlias = new Map();
   for (const item of items) {
@@ -115,23 +161,25 @@ function itemMatcher(items) {
 }
 
 function unitFamily(unit) {
-  if (bags.test(unit)) return 'bags';
-  if (cases.test(unit)) return 'cases';
-  if (/^(?:kg|kilos?|kilograms?|किलो|किलोग्राम)$/u.test(unit)) return 'kg';
-  if (/^(?:l|litres?|liters?|लिटर|लीटर)$/u.test(unit)) return 'litre';
-  return unit;
+  if (unit === 'l') return 'litres';
+  return unitMentions.find(([, pattern]) => pattern.test(unit))?.[0] ?? unit;
+}
+
+function unitLabel(item, quantity, locale) {
+  if (locale === 'en') return item.unit;
+  return {
+    bags: { hi: ['बोरी', 'बोरियाँ'], mr: ['पिशवी', 'पिशव्या'] },
+    boxes: { hi: ['डिब्बा', 'डिब्बे'], mr: ['खोका', 'खोके'] },
+    kg: { hi: ['किलो', 'किलो'], mr: ['किलो', 'किलो'] },
+    litres: { hi: ['लीटर', 'लीटर'], mr: ['लिटर', 'लिटर'] },
+    pieces: { hi: ['पीस', 'पीस'], mr: ['नग', 'नग'] },
+    bottles: { hi: ['बोतल', 'बोतलें'], mr: ['बाटली', 'बाटल्या'] },
+    packets: { hi: ['पैकेट', 'पैकेट'], mr: ['पॅकेट', 'पॅकेट'] },
+  }[unitFamily(normalize(item.unit))]?.[locale]?.[quantity === 1 ? 0 : 1] ?? item.unit;
 }
 
 function describeAmount(item, quantity, locale) {
-  if (locale === 'en') return `${quantities.en[quantity] ?? quantity} ${item.unit}`;
-  const number = quantities[locale][quantity] ?? quantity;
-  const unit = {
-    bags: { hi: ['बोरी', 'बोरियाँ'], mr: ['पिशवी', 'पिशव्या'] },
-    cases: { hi: ['डिब्बा', 'डिब्बे'], mr: ['खोका', 'खोके'] },
-    kg: { hi: ['किलो', 'किलो'], mr: ['किलो', 'किलो'] },
-    litre: { hi: ['लीटर', 'लीटर'], mr: ['लिटर', 'लिटर'] },
-  }[unitFamily(normalize(item.unit))]?.[locale]?.[quantity === 1 ? 0 : 1] ?? item.unit;
-  return `${number} ${unit}`;
+  return `${quantities[locale][quantity] ?? quantity} ${unitLabel(item, quantity, locale)}`;
 }
 
 function productName(item, locale) {
@@ -191,6 +239,44 @@ const basicQuestion = {
   mr: 'कोणत्या वस्तूचे प्रमाण बदलायचे आहे, आणि किती करू?',
 };
 
+const spokenWording = {
+  clarify: {
+    en: [basicQuestion.en, 'Could you say the item and the new total together? For example, “set rice to two bags.”', 'Tell me the item name and how many you want in total.'],
+    hi: [basicQuestion.hi, 'सामान का नाम और नई मात्रा एक साथ बताएँगे? जैसे, “चावल की दो बोरियाँ कर दीजिए।”', 'सामान का नाम बताइए, और बताइए कि कुल कितना चाहिए।'],
+    mr: [basicQuestion.mr, 'वस्तूचं नाव आणि नवीन प्रमाण एकत्र सांगाल का? उदा. “तांदळाच्या दोन पिशव्या करा.”', 'वस्तूचं नाव सांगा. तिचं एकूण प्रमाण किती ठेवायचं तेही सांगा.'],
+  },
+  outOfScope: {
+    en: ['I can only help with the order you have open. Would you like to check what’s shipped or change an item that’s still pending?', 'That’s outside what I can help with here. I can check your order or help you update an item that hasn’t shipped. What would you like to do?'],
+    hi: ['मैं यहाँ सिर्फ़ आपके खुले ऑर्डर में मदद कर सकता हूँ। क्या आप देखना चाहेंगे कि क्या भेजा जा चुका है, या बाकी सामान में कोई बदलाव करना है?', 'उस सवाल में मैं मदद नहीं कर पाऊँगा। अगर आपको ऑर्डर की स्थिति देखनी है या भेजे जाने से पहले कोई सामान बदलना है, तो बताइए।'],
+    mr: ['इथे मी फक्त तुमच्या उघड्या ऑर्डरबद्दल मदत करू शकतो. कोणता माल रवाना झाला ते पाहायचं आहे, की अजून न पाठवलेल्या वस्तूत बदल करायचा आहे?', 'त्या प्रश्नात मला मदत करता येणार नाही. पण ऑर्डरची स्थिती तपासायची असेल किंवा अजून न पाठवलेल्या वस्तूत बदल करायचा असेल, तर सांगा.'],
+  },
+  proposeAddition: {
+    en: ['Shall I add {amount} to your order?', 'Should I go ahead and add {amount}?'],
+    hi: ['क्या मैं {amount} जोड़ दूँ?', 'ठीक है, {amount} ऑर्डर में जोड़ दूँ?'],
+    mr: ['{amount} ऑर्डरमध्ये टाकू का?', 'ठीक आहे, {amount} घालू का?'],
+  },
+  propose: {
+    en: ['Shall I change it to {amount}?', 'Should I go ahead with {amount}?'],
+    hi: ['क्या मैं {amount} कर दूँ?', 'ठीक है, {amount} कर दूँ?'],
+    mr: ['{amount} करू का?', 'ठीक आहे, {amount} ठेवू का?'],
+  },
+  saved: {
+    en: ['All set. The order now has {amount}.', 'I saved the change. The order now has {amount}.'],
+    hi: ['हो गया। ऑर्डर में अब {amount} हैं।', 'बदलाव हो गया। अब आपके ऑर्डर में {amount} हैं।'],
+    mr: ['झालं. आता ऑर्डरमध्ये {amount} आहेत.', 'बदल केला आहे. आता ऑर्डरमध्ये {amount} आहेत.'],
+  },
+  proposeRemoval: {
+    en: ['Shall I remove {amount} from the order?', 'Should I go ahead and remove {amount}?'],
+    hi: ['क्या मैं {amount} ऑर्डर से हटा दूँ?', 'ठीक है, {amount} हटा दूँ?'],
+    mr: ['ऑर्डरमधून {amount} काढू का?', 'ठीक आहे, {amount} काढू का?'],
+  },
+  removed: {
+    en: ['Done. I removed {amount} from the order.', '{amount} has been removed from the order.'],
+    hi: ['हो गया। {amount} ऑर्डर से हटा दिया है।', 'आपके ऑर्डर से {amount} हटा दिया है।'],
+    mr: ['झालं. ऑर्डरमधून {amount} काढला आहे.', 'तुमच्या ऑर्डरमधून {amount} काढला आहे.'],
+  },
+};
+
 export function createSession(order, language = 'en-IN') {
   const { history = [], ...record } = order;
   const greetings = {
@@ -211,28 +297,77 @@ export function snapshot({ order, pending, history, messages }) {
   return structuredClone({ order, pending, history, messages });
 }
 
-export function handleTurn(session, { text = '', language } = {}) {
+export function handleTurn(session, { text = '', language, itemAction } = {}) {
   const input = typeof text === 'string' ? normalize(text) : '';
   const locale = localeFor(input, language, session.messages.at(-1)?.language);
   const key = localeKeys[locale];
   const t = (en, hi, mr) => ({ en, hi, mr }[key]);
-  const speak = (reply) => {
+  const previousReply = session.messages.at(-1)?.text;
+  const speak = (reply, choices, change) => {
     session.messages.push({ role: 'agent', text: reply, language: locale });
     if (session.messages.length > 81) session.messages.splice(0, session.messages.length - 81);
-    return { reply, language: locale };
+    return { reply, language: locale, choices, change };
   };
+  const rejectChange = reply => ({ ...speak(reply), rejectedChange: true });
+  const ask = (kind, prefix) => {
+    const options = spokenWording[kind][key];
+    const reply = options.find(option => !previousReply?.endsWith(option));
+    return speak([prefix, reply].filter(Boolean).join(' '), { options, amount: '', prefix });
+  };
+  const clarifyChange = () => ask('clarify');
   if (!input) return speak(t('I missed that. Could you try again?', 'मुझे सुनाई नहीं दिया। फिर से कहेंगे?', 'मला ऐकू आलं नाही. पुन्हा सांगाल का?'));
   session.messages.push({ role: 'caller', text: text.trim(), language: locale });
 
-  const getItem = (id) => session.order.items.find((item) => item.id === id);
-  const matcher = itemMatcher(session.order.items);
+  const draftItem = session.pending?.newItem;
+  const orderItems = session.order.items;
+  const knownItems = draftItem ? [...orderItems, draftItem] : orderItems;
+  const getItem = (id) => knownItems.find((item) => item.id === id);
+  const matcher = itemMatcher(knownItems);
   const mentionIds = matcher.ids;
   const noChange = () => speak(t('There’s no change waiting for confirmation. What would you like to update?', 'अभी कोई बदलाव पुष्टि के लिए बाकी नहीं है। क्या बदलना है?', 'सध्या पुष्टीसाठी कोणताही बदल बाकी नाही. काय बदलायचं आहे?'));
   const blocked = (item) => {
     const name = productName(item, key);
-    return t(`${name} has already shipped, so I can’t change it.`, `${name} की खेप पहले ही निकल चुकी है। उसमें अब बदलाव नहीं हो सकता।`, `${name} याची खेप आधीच रवाना झाली आहे. आता बदल करता येणार नाही.`);
+    return t(`${name} has already shipped, so I can’t change it or remove it from the order.`, `${name} की खेप पहले ही भेज दी गई है। अब बदलाव नहीं हो सकता और इसे ऑर्डर से हटाया भी नहीं जा सकता।`, `${name} असलेली खेप आधीच रवाना झाली आहे. आता बदल करता येणार नाही आणि ती वस्तू ऑर्डरमधून काढताही येणार नाही.`);
   };
   const clearDraft = () => { session.pending = null; session.focus = null; };
+  function proposeAddition(action) {
+    clearDraft();
+    const name = typeof action.name === 'string' ? action.name.trim().normalize('NFC') : '';
+    const quantity = action.quantity;
+    const unit = action.unit;
+    if (!name || name.length > 180 || !/\p{L}/u.test(name) || /[\p{Cc}\u202a-\u202e\u2066-\u2069]/u.test(name) || !itemUnits.has(unit)) {
+      return rejectChange(t('Tell me the item name and its unit, such as bags or bottles.', 'सामान का नाम और उसकी इकाई बताइए, जैसे बोरी या बोतल।', 'वस्तूचं नाव आणि एकक सांगा, उदा. पिशव्या किंवा बाटल्या.'));
+    }
+    const normalizedName = normalize(name);
+    const existing = orderItems.find(item => matchesItemName(item, normalizedName));
+    if (existing?.status === 'shipped') return rejectChange(blocked(existing));
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > maxQuantity) {
+      return rejectChange(t(`To add ${name}, enter a whole quantity between 1 and ${maxQuantity}.`, `${name} जोड़ने के लिए मात्रा 1 से ${maxQuantity} के बीच की पूर्ण संख्या में बताइए।`, `${name} जोडण्यासाठी 1 ते ${maxQuantity} यांमधली पूर्ण संख्या सांगा.`));
+    }
+    if (existing?.quantity) {
+      session.focus = existing.id;
+      return speak(t(`${existing.name} is already on the order. What should its total quantity be?`, `${productName(existing, key)} ऑर्डर में पहले से है। इसकी कुल मात्रा कितनी रखूँ?`, `${productName(existing, key)} ऑर्डरमध्ये आधीच आहे. एकूण किती ठेवू?`));
+    }
+    if (existing && unitFamily(existing.unit) !== unitFamily(unit)) {
+      return speak(t(`Use ${existing.unit} for ${existing.name}.`, `${productName(existing, key)} के लिए ${existing.unit} में मात्रा बताइए।`, `${productName(existing, key)} याचं प्रमाण ${existing.unit} मध्ये सांगा.`));
+    }
+    const item = existing ?? { id: randomUUID(), name, unit, quantity: 0, status: 'pending' };
+    session.pending = { itemId: item.id, name: item.name, from: 0, to: quantity, ...(existing ? {} : { newItem: item }) };
+    const amount = describeAmount(item, quantity, key);
+    const detail = t(`${amount} of ${item.name}`, hindiItemAmount(item, quantity), marathiItemAmount(item, quantity));
+    const options = spokenWording.proposeAddition[key];
+    return speak(options[0].replace('{amount}', () => detail), { options, amount: detail });
+  }
+  if (itemAction?.type === 'add') return proposeAddition(itemAction);
+  if (itemAction?.type === 'remove') {
+    clearDraft();
+    const item = orderItems.find(line => line.id === itemAction.itemId);
+    if (!item || (!item.quantity && item.status !== 'shipped')) return speak(t('That item is no longer on the order.', 'यह सामान अब ऑर्डर में नहीं है।', 'ही वस्तू आता ऑर्डरमध्ये नाही.'));
+    if (item.status === 'shipped') return rejectChange(blocked(item));
+    const name = productName(item, key);
+    session.pending = { itemId: item.id, name: item.name, from: item.quantity, to: 0 };
+    return speak(t(`Shall I remove ${name} from the order?`, `क्या मैं ${name} ऑर्डर से हटा दूँ?`, `ऑर्डरमधून ${name} काढू का?`), { options: spokenWording.proposeRemoval[key], amount: name });
+  }
   const normalizedAnswer = input.replace(/[,.!।;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 
   if (draftCancellation.has(normalizedAnswer)) {
@@ -248,12 +383,15 @@ export function handleTurn(session, { text = '', language } = {}) {
     if (!item || item.status !== 'pending' || item.quantity !== pending.from) {
       return speak(t('The order changed while we were talking. Let’s check it again.', 'बात करते समय ऑर्डर बदल गया। चलिए फिर से देखते हैं।', 'आपण बोलत असताना ऑर्डर बदलली. पुन्हा तपासूया.'));
     }
+    if (pending.newItem) orderItems.push(item);
     item.quantity = pending.to;
-    session.history.unshift({ ...pending, at: new Date().toISOString() });
+    const { newItem, ...entry } = pending;
+    session.history.unshift({ ...entry, at: new Date().toISOString() });
     const name = productName(item, key);
     const amount = describeAmount(item, item.quantity, key);
-    if (item.quantity === 0) return speak(t(`Done. I removed the ${name} from the order.`, `हो गया। ${name} ऑर्डर से हटा दिया है।`, `झालं. ऑर्डरमधून ${name} काढला आहे.`));
-    return speak(t(`Done. The order now has ${amount} of ${name}.`, `हो गया। ऑर्डर में अब ${hindiItemAmount(item, item.quantity)} हैं।`, `झालं. ऑर्डरमध्ये आता ${marathiItemAmount(item, item.quantity)} आहेत.`));
+    if (item.quantity === 0) return speak(t(`Done. I removed the ${name} from the order.`, `हो गया। ${name} ऑर्डर से हटा दिया है।`, `झालं. ऑर्डरमधून ${name} काढला आहे.`), { options: spokenWording.removed[key], amount: name }, pending);
+    const detail = t(`${amount} of ${name}`, hindiItemAmount(item, item.quantity), marathiItemAmount(item, item.quantity));
+    return speak(t(`Done. The order now has ${detail}.`, `हो गया। ऑर्डर में अब ${detail} हैं।`, `झालं. ऑर्डरमध्ये आता ${detail} आहेत.`), { options: spokenWording.saved[key], amount: detail }, pending);
   }
 
   const reference = orderReference(input, session.order.id);
@@ -263,10 +401,17 @@ export function handleTurn(session, { text = '', language } = {}) {
   }
   const command = reference.rest;
   const itemIds = mentionIds(command);
-  const isRead = reads.test(command);
+  const isOrderRead = (text, ids) => quickStatus.test(text) ||
+    (orderScope.test(text) && (reads.test(text) || shippingStatus.test(text))) ||
+    (ids.length > 0 && (shippingStatus.test(text) || itemStatus.test(text)));
+  const isGeneralQuestion = (text, ids) => generalQuestion.test(text) && !isOrderRead(text, ids) &&
+    !orderScope.test(text) && !editScope.test(text);
+  const addition = !doNotChange.test(command) ? spokenAddition(command) : null;
+  if (addition && !knownItems.some(item => matchesItemName(item, normalize(addition.name)))) return proposeAddition(addition);
+  const isRead = isOrderRead(command, itemIds);
   if (wholeOrderCancel.test(input)) {
     clearDraft();
-    return speak(t('I can remove an item that hasn’t shipped. A full order cancellation needs the dispatch team.', 'जो सामान भेजा नहीं गया है, उसे हटा सकता हूँ। पूरा ऑर्डर रद्द करने के लिए डिस्पैच टीम से बात करनी होगी।', 'अजून न पाठवलेली वस्तू काढता येईल. पूर्ण ऑर्डर रद्द करण्यासाठी डिस्पॅच टीमशी बोलावं लागेल.'));
+    return rejectChange(t('I can remove an item that hasn’t shipped. A full order cancellation needs the dispatch team.', 'जो सामान भेजा नहीं गया है, उसे हटा सकता हूँ। पूरा ऑर्डर रद्द करने के लिए डिस्पैच टीम से बात करनी होगी।', 'अजून न पाठवलेली वस्तू काढता येईल. पूर्ण ऑर्डर रद्द करण्यासाठी डिस्पॅच टीमशी बोलावं लागेल.'));
   }
 
   const clauses = clausesFor(command, mentionIds);
@@ -284,15 +429,19 @@ export function handleTurn(session, { text = '', language } = {}) {
     const hasQuantity = quantity.ambiguous || quantity.value !== undefined;
     const declinesItem = ids.length > 0 && !hasQuantity && /(?:नको|नहीं चाहिए|नही चाहिए)$/u.test(clause);
     const hasAction = changes.test(clause) || removes.test(clause) || addBy.test(clause) || subtractBy.test(clause) || declinesItem;
-    const wantsRead = reads.test(clause) && !hasAction;
+    const wantsRead = isOrderRead(clause, ids) && !hasAction;
     if (wantsRead) {
       readItems.push(...ids);
       continue;
     }
     if (doNotChange.test(clause)) continue;
+    if (isGeneralQuestion(clause, ids)) continue;
+    if (reads.test(clause) && !hasAction) continue;
     if (ids.length && !hasAction && !hasQuantity) {
-      readItems.push(...ids);
-      pairedScope = true;
+      if (!matcher.withoutItems(clause).replace(/[,.!?।-]/gu, '').trim()) {
+        readItems.push(...ids);
+        pairedScope = true;
+      }
       continue;
     }
     if (!hasAction && !hasQuantity) continue;
@@ -323,29 +472,38 @@ export function handleTurn(session, { text = '', language } = {}) {
     else if (delta && target >= 0) target = item.quantity + (subtractBy.test(clause) || englishDelta === 'reduce' || englishDelta === 'decrease' ? -target : target);
     const unit = unitFamily(normalize(item.unit));
     const remainder = matcher.withoutItems(clause);
-    const incompatibleUnit = (bags.test(remainder) && unit !== 'bags') || (cases.test(remainder) && unit !== 'cases') ||
-      (weights.test(remainder) && (/(?:litres?|liters?|लिटर|लीटर)/u.test(remainder) ? unit !== 'litre' : unit !== 'kg'));
-    const limit = item.limit ?? maxQuantity;
-    if (!Number.isInteger(target) || target < 0 || target > limit || incompatibleUnit) {
-      invalid.set(item, limit);
+    const incompatibleUnit = unitMentions.some(([family, pattern]) => family !== unit && pattern.test(remainder));
+    const limit = Math.min(item.limit ?? maxQuantity, maxQuantity);
+    const name = productName(item, key);
+    let reason;
+    if (target < 0) {
+      reason = t(`${name} can’t have a negative quantity. Enter zero to remove it or give a positive quantity.`, `${name} की मात्रा शून्य से कम नहीं हो सकती। हटाने के लिए शून्य बताइए, या शून्य से बड़ी मात्रा बताइए।`, `${name} या वस्तूचं प्रमाण शून्यापेक्षा कमी ठेवता येत नाही. काढण्यासाठी शून्य सांगा किंवा त्यापेक्षा जास्त प्रमाण द्या.`);
+    } else if (target > limit) {
+      const max = describeAmount(item, limit, key);
+      reason = t(`The maximum for ${name} is ${max}. What quantity should I use within that limit?`, `${name} के लिए अधिकतम मात्रा ${max} है। इस सीमा में कितनी मात्रा रखूँ?`, `${name}साठी जास्तीत जास्त ${max} ठेवता येतील. या मर्यादेत किती ठेवू?`);
+    } else if (!Number.isInteger(target)) {
+      reason = t(`${name} needs a whole number. What whole quantity should I use?`, `${name} की मात्रा पूर्ण संख्या में होनी चाहिए। कितनी रखूँ?`, `${name} या वस्तूचं प्रमाण पूर्ण संख्येत असावं लागेल. किती ठेवू?`);
+    } else if (incompatibleUnit) {
+      const expected = unitLabel(item, 2, key);
+      reason = t(`This order measures ${name} in ${expected}. How many ${expected} should I use?`, `इस ऑर्डर में ${name} की इकाई ${expected} है। इसी इकाई में मात्रा बताइए।`, `या ऑर्डरमध्ये ${name}साठी एकक ${expected} आहे. त्याच एककात प्रमाण सांगा.`);
+    }
+    if (reason) {
+      invalid.set(item, reason);
       continue;
     }
-    plans.push({ itemId: item.id, name: item.name, from: item.quantity, to: target });
+    plans.push({ itemId: item.id, name: item.name, from: item.quantity, to: target, ...(item === draftItem ? { newItem: item } : {}) });
   }
 
   const blockedText = [...unavailable].map(blocked).join(' ');
-  if (pairedScope && (plans.length || unavailable.size || unclear.size) && itemIds.length > 1) {
-    clearDraft();
-    return speak([blockedText, basicQuestion[key]].filter(Boolean).join(' '));
-  }
   if (invalid.size) {
     clearDraft();
-    const [[item, limit]] = invalid;
+    const [item] = invalid.keys();
     session.focus = invalid.size === 1 && plans.length === 0 ? item.id : null;
-    const name = productName(item, key);
-    const max = describeAmount(item, limit, key);
-    const response = t(`What whole quantity should I use for ${name}? The maximum is ${max}.`, `${name} की पूरी संख्या बताइए। ज़्यादा से ज़्यादा ${max} रख सकते हैं।`, `${name} किती ठेवायचा, पूर्ण संख्या सांगा. जास्तीत जास्त ${max} ठेवता येतील.`);
-    return speak([blockedText, response].filter(Boolean).join(' '));
+    return rejectChange([blockedText, ...invalid.values()].filter(Boolean).join(' '));
+  }
+  if (pairedScope && (plans.length || unavailable.size || unclear.size) && itemIds.length > 1) {
+    clearDraft();
+    return blockedText ? rejectChange(`${blockedText} ${basicQuestion[key]}`) : clarifyChange();
   }
   if (unclear.size || plans.length > 1) {
     clearDraft();
@@ -356,6 +514,7 @@ export function handleTurn(session, { text = '', language } = {}) {
       const name = productName(item, key);
       response = t(`What should the final quantity of ${name} be?`, `${name} की कुल मात्रा कितनी कर दूँ?`, `${name} एकूण किती ठेवायचा?`);
     }
+    if (!blockedText && response === basicQuestion[key]) return clarifyChange();
     return speak([blockedText, response].filter(Boolean).join(' '));
   }
   if (plans.length === 1) {
@@ -365,6 +524,7 @@ export function handleTurn(session, { text = '', language } = {}) {
     const name = productName(item, key);
     const amount = describeAmount(item, proposal.to, key);
     let response;
+    let choices;
     if (proposal.from === proposal.to) {
       session.pending = null;
       response = t(`The order already has ${amount} of ${name}.`, `ऑर्डर में ${hindiItemAmount(item, proposal.to)} पहले से हैं।`, `ऑर्डरमध्ये ${marathiItemAmount(item, proposal.to)} आधीपासूनच आहेत.`);
@@ -373,29 +533,42 @@ export function handleTurn(session, { text = '', language } = {}) {
       response = proposal.to === 0
         ? t(`I can remove the ${name}. Shall I go ahead?`, `${name} हटा सकता हूँ। कर दूँ?`, `${name} काढता येईल. काढू का?`)
         : t(`I can set ${name} to ${amount}. Shall I make that change?`, `${hindiItemAmount(item, proposal.to)} कर सकता हूँ। यह बदलाव कर दूँ?`, `${marathiItemAmount(item, proposal.to)} करता येतील. हा बदल करू का?`);
+      choices = proposal.to === 0
+        ? { options: spokenWording.proposeRemoval[key], amount: name, prefix: blockedText }
+        : { options: spokenWording.propose[key], amount: t(`${amount} of ${name}`, hindiItemAmount(item, proposal.to), marathiItemAmount(item, proposal.to)), prefix: blockedText };
     }
-    return speak([blockedText, response].filter(Boolean).join(' '));
+    return speak([blockedText, response].filter(Boolean).join(' '), choices);
   }
   if (unavailable.size) {
     clearDraft();
-    return speak(blockedText);
+    return rejectChange(blockedText);
   }
   if (isRead || readItems.length || reference.found) {
     if (!readItems.length) readItems = itemIds;
-    const items = readItems.length ? [...new Set(readItems)].map(getItem) : session.order.items;
+    const items = (readItems.length ? [...new Set(readItems)].map(getItem) : orderItems)
+      .filter(item => item.quantity > 0 || item.status === 'shipped');
     const pendingReminder = session.pending ? t(' Your proposed change is still waiting for confirmation.', ' आपका बदलाव अभी पुष्टि के लिए बाकी है।', ' तुम्ही सांगितलेल्या बदलाला अजून पुष्टी हवी आहे.') : '';
-    return speak(`${describeOrder(items, key)}.${pendingReminder}`);
+    const details = items.length ? describeOrder(items, key) + '.' : t('There are no active items here.', 'यहाँ कोई सक्रिय सामान नहीं है।', 'इथे सध्या कोणतीही वस्तू नाही.');
+    return speak(details + pendingReminder);
   }
   if (doNotChange.test(command)) {
     clearDraft();
     return speak(t('Okay, I’ve left the order as it was.', 'ठीक है, ऑर्डर वैसा ही रहेगा।', 'ठीक आहे, ऑर्डर जशी होती तशीच ठेवली आहे.'));
   }
 
+  const quantityRemainder = command.replace(numberRegex, ' ').replace(/\s+/gu, ' ').trim();
+  const bareQuantity = quantityRemainder !== command && /^(?:(?:फक्त|सिर्फ)\s+)?(?:करा|कर दो|कर दीजिए)?[.!।]?$/u.test(quantityRemainder);
+  const orderRequest = orderScope.test(command) || editScope.test(command) || bareQuantity ||
+    (changes.test(command) && (itemIds.length > 0 || unitMentions.some(([, pattern]) => pattern.test(command))));
+  if (!orderRequest || isGeneralQuestion(command, itemIds)) {
+    const pendingReminder = session.pending ? t('Your proposed change is still waiting for confirmation.', 'आपका बदलाव अभी पुष्टि के लिए बाकी है।', 'तुम्ही सांगितलेल्या बदलाला अजून पुष्टी हवी आहे.') : '';
+    return ask('outOfScope', pendingReminder);
+  }
   if (session.pending || session.focus) {
     const draftItem = getItem(session.pending?.itemId ?? session.focus);
     clearDraft();
     session.focus = draftItem?.id ?? null;
     return speak(t('I didn’t get the latest change. Could you say the item and final quantity again?', 'आख़िरी बदलाव समझ नहीं आया। सामान और कुल मात्रा फिर से बताएँगे?', 'शेवटचा बदल कळला नाही. वस्तू आणि एकूण प्रमाण पुन्हा सांगाल का?'));
   }
-  return speak(basicQuestion[key]);
+  return clarifyChange();
 }

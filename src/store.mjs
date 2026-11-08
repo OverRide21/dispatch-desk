@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { createClient } from '@libsql/client/web';
+import { openLocalSqlite } from './sqlite.mjs';
 
 const importLifetime = 30 * 60 * 1000;
 const maxQuantity = 1_000_000;
-const schemaVersion = 1;
+const schemaVersion = 2;
+const callLifetime = 2 * 60 * 60 * 1000;
+const lockLifetime = 60_000;
 
 function storeError(status, code, message) {
   return Object.assign(new Error(message), { status, code });
@@ -111,13 +114,17 @@ function compareOrder(current, incoming) {
   return { status: changed ? 'updated' : 'unchanged', order: { ...incoming, items } };
 }
 
-function setup(db) {
-  db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;');
-  const version = db.prepare('PRAGMA user_version').get().user_version;
+async function setup(db) {
+  const metadata = await db.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dispatch_schema'");
+  const version = metadata.rows.length
+    ? (await db.execute('SELECT version FROM dispatch_schema WHERE id = 1')).rows[0]?.version ?? 0
+    : (await db.execute('PRAGMA user_version')).rows[0].user_version;
   if (version > schemaVersion) throw new Error('The database was created by a newer Dispatch Desk version.');
-  if (version === schemaVersion) return;
-  db.exec(`
-    BEGIN IMMEDIATE;
+  if (metadata.rows.length && version === schemaVersion) return;
+  const schema = `
+    CREATE TABLE IF NOT EXISTS dispatch_schema (
+      id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS orders (
       workspace_id TEXT NOT NULL, id TEXT NOT NULL, customer TEXT NOT NULL,
       revision INTEGER NOT NULL CHECK (revision > 0),
@@ -149,131 +156,189 @@ function setup(db) {
     CREATE TABLE IF NOT EXISTS auth_sessions (
       token_hash TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, user TEXT NOT NULL, expires_at INTEGER NOT NULL
     ) STRICT;
-    PRAGMA user_version = 1;
-    COMMIT;
-  `);
+    CREATE TABLE IF NOT EXISTS call_sessions (
+      id TEXT PRIMARY KEY, owner TEXT NOT NULL, workspace_id TEXT NOT NULL,
+      state TEXT NOT NULL, revision INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+      lock_token TEXT, lock_until INTEGER NOT NULL DEFAULT 0
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS call_sessions_owner ON call_sessions (owner);
+    CREATE INDEX IF NOT EXISTS call_sessions_expiry ON call_sessions (expires_at);
+    CREATE TABLE IF NOT EXISTS request_limits (
+      key TEXT PRIMARY KEY, count INTEGER NOT NULL, until_at INTEGER NOT NULL
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS request_limits_expiry ON request_limits (until_at);
+    INSERT INTO dispatch_schema (id, version) VALUES (1, ${schemaVersion})
+      ON CONFLICT(id) DO UPDATE SET version = max(dispatch_schema.version, excluded.version);
+  `;
+  await db.batch(schema.split(';').map(statement => statement.trim()).filter(Boolean), 'write');
 }
 
-export function createStore(path = process.env.DISPATCH_DB_PATH || '.dispatch/dispatch.sqlite') {
-  const filename = path === ':memory:' ? path : resolve(/* turbopackIgnore: true */ path);
-  if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(filename);
+export async function createStore(path = process.env.DISPATCH_DB_PATH || '.dispatch/dispatch.sqlite', cloud = null) {
+  let db;
+  if (cloud) {
+    db = createClient(cloud);
+  } else {
+    const filename = path === ':memory:' ? path : resolve(/* turbopackIgnore: true */ path);
+    if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
+    db = openLocalSqlite(filename);
+  }
   try {
-    setup(db);
+    await setup(db);
   } catch (error) {
     db.close();
     throw error;
   }
-  const orderById = db.prepare('SELECT id, customer, revision FROM orders WHERE workspace_id = ? AND id = ?');
-  const itemsByOrder = db.prepare('SELECT * FROM order_items WHERE workspace_id = ? AND order_id = ? ORDER BY position, id');
-  const changesByOrder = db.prepare(`
+  const orderById = 'SELECT id, customer, revision FROM orders WHERE workspace_id = ? AND id = ?';
+  const itemsByOrder = 'SELECT * FROM order_items WHERE workspace_id = ? AND order_id = ? ORDER BY position, id';
+  const changesByOrder = `
     SELECT item_id AS itemId, name, from_quantity AS "from", to_quantity AS "to", created_at AS at, actor
     FROM order_changes WHERE workspace_id = ? AND order_id = ? ORDER BY sequence DESC LIMIT 100
-  `);
-  const list = db.prepare(`
+  `;
+  const list = `
     SELECT o.id, o.customer, o.revision,
-      (SELECT count(*) FROM order_items i WHERE i.workspace_id = o.workspace_id AND i.order_id = o.id) AS itemCount
+      (SELECT count(*) FROM order_items i WHERE i.workspace_id = o.workspace_id AND i.order_id = o.id
+        AND (i.quantity > 0 OR i.status = 'shipped')) AS itemCount
     FROM orders o WHERE o.workspace_id = ?
       AND (instr(lower(o.id), lower(?)) > 0 OR instr(lower(o.customer), lower(?)) > 0)
     ORDER BY o.id COLLATE NOCASE, o.id LIMIT ?
-  `);
-  const writeOrder = db.prepare(`
+  `;
+  const writeOrder = `
     INSERT INTO orders (workspace_id, id, customer, revision) VALUES (?, ?, ?, ?)
     ON CONFLICT (workspace_id, id) DO UPDATE SET customer = excluded.customer, revision = excluded.revision
-  `);
-  const writeItem = db.prepare(`
+  `;
+  const writeItem = `
     INSERT INTO order_items (workspace_id, order_id, id, position, name, sku, unit, quantity, status, aliases, name_hi, name_mr)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (workspace_id, order_id, id) DO UPDATE SET position = excluded.position,
       name = excluded.name, sku = excluded.sku, unit = excluded.unit, quantity = excluded.quantity,
       status = excluded.status, aliases = excluded.aliases, name_hi = excluded.name_hi, name_mr = excluded.name_mr
-  `);
-  const insertChange = db.prepare(`
+  `;
+  const insertChange = `
     INSERT INTO order_changes (workspace_id, order_id, item_id, name, from_quantity, to_quantity, created_at, actor)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const changeQuantity = db.prepare('UPDATE order_items SET quantity = ? WHERE workspace_id = ? AND order_id = ? AND id = ?');
-  const incrementRevision = db.prepare('UPDATE orders SET revision = revision + 1 WHERE workspace_id = ? AND id = ?');
-  const importById = db.prepare('SELECT * FROM order_imports WHERE workspace_id = ? AND id = ? AND actor = ?');
-  const insertImport = db.prepare('INSERT INTO order_imports (workspace_id, id, actor, created_at, expires_at, data, result) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  const finishImport = db.prepare('UPDATE order_imports SET committed_at = ?, data = NULL WHERE workspace_id = ? AND id = ?');
-  const purgeImports = db.prepare('DELETE FROM order_imports WHERE committed_at IS NULL AND expires_at <= ?');
-  const insertAuth = db.prepare('INSERT INTO auth_sessions (workspace_id, user, token_hash, expires_at) VALUES (?, ?, ?, ?)');
-  const authByToken = db.prepare('SELECT workspace_id AS workspaceId, user, expires_at AS expiresAt FROM auth_sessions WHERE token_hash = ? AND expires_at > ?');
-  const deleteAuth = db.prepare('DELETE FROM auth_sessions WHERE token_hash = ?');
-  const purgeAuth = db.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?');
+  `;
+  const changeQuantity = 'UPDATE order_items SET quantity = ? WHERE workspace_id = ? AND order_id = ? AND id = ?';
+  const incrementRevision = 'UPDATE orders SET revision = revision + 1 WHERE workspace_id = ? AND id = ?';
+  const importById = 'SELECT * FROM order_imports WHERE workspace_id = ? AND id = ? AND actor = ?';
+  const insertImport = 'INSERT INTO order_imports (workspace_id, id, actor, created_at, expires_at, data, result) VALUES (?, ?, ?, ?, ?, ?, ?)';
+  const finishImport = 'UPDATE order_imports SET committed_at = ?, data = NULL WHERE workspace_id = ? AND id = ?';
+  const purgeImports = 'DELETE FROM order_imports WHERE committed_at IS NULL AND expires_at <= ?';
+  const insertAuth = 'INSERT INTO auth_sessions (workspace_id, user, token_hash, expires_at) VALUES (?, ?, ?, ?)';
+  const authByToken = 'SELECT workspace_id AS workspaceId, user, expires_at AS expiresAt FROM auth_sessions WHERE token_hash = ? AND expires_at > ?';
+  const deleteAuth = 'DELETE FROM auth_sessions WHERE token_hash = ?';
+  const purgeAuth = 'DELETE FROM auth_sessions WHERE expires_at <= ?';
+  const callFields = 'id, owner, workspace_id AS workspaceId, state, revision';
+  const callMatch = 'id = ? AND owner = ? AND workspace_id = ? AND expires_at > ?';
 
-  function transaction(work) {
-    db.exec('BEGIN IMMEDIATE');
+  const statement = (sql, ...args) => ({ sql, args });
+
+  async function transaction(work) {
+    const tx = await db.transaction('write');
     try {
-      const result = work();
-      db.exec('COMMIT');
+      const result = await work(tx);
+      await tx.commit();
       return result;
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
+    } finally {
+      tx.close();
     }
   }
 
-  function getOrder(workspaceId, id) {
-    const order = orderById.get(workspaceId, id);
-    if (!order) return null;
+  async function getOrder(workspaceId, id, client = db) {
+    const queries = [
+      statement(orderById, workspaceId, id),
+      statement(itemsByOrder, workspaceId, id),
+      statement(changesByOrder, workspaceId, id),
+    ];
+    const [order, items, history] = client === db ? await db.batch(queries, 'read') : await client.batch(queries);
+    if (!order.rows.length) return null;
     return {
-      ...order,
-      items: itemsByOrder.all(workspaceId, id).map(rowToItem),
-      history: changesByOrder.all(workspaceId, id).map(row => ({ ...row })),
+      ...order.rows[0],
+      items: items.rows.map(rowToItem),
+      history: history.rows.map(row => ({ ...row })),
     };
   }
 
-  function saveQuantity(workspaceId, orderId, { itemId, quantity, revision, actor }) {
+  async function getOrdersForImport(tx, workspaceId, ids) {
+    const selection = ' WHERE workspace_id = ? AND ';
+    const selected = JSON.stringify(ids);
+    const [orders, items] = await tx.batch([
+      statement('SELECT id, customer, revision FROM orders' + selection + 'id IN (SELECT value FROM json_each(?))', workspaceId, selected),
+      statement('SELECT * FROM order_items' + selection + 'order_id IN (SELECT value FROM json_each(?)) ORDER BY position, id', workspaceId, selected),
+    ]);
+    const byId = new Map(orders.rows.map(row => [row.id, { ...row, items: [] }]));
+    for (const row of items.rows) byId.get(row.order_id)?.items.push(rowToItem(row));
+    return byId;
+  }
+
+  function saveQuantity(workspaceId, orderId, { itemId, quantity, revision, actor, newItem }) {
     if (!validQuantity(quantity)) throw storeError(400, 'invalid-quantity', 'Enter a whole quantity between 0 and 1,000,000.');
-    return transaction(() => {
-      const order = getOrder(workspaceId, orderId);
+    return transaction(async tx => {
+      const order = await getOrder(workspaceId, orderId, tx);
       if (!order) throw storeError(404, 'order-not-found', 'The order could not be found.');
       if (order.revision !== revision) throw storeError(409, 'order-stale', 'This order changed. Review it before confirming again.');
       const item = order.items.find(line => line.id === itemId);
+      if (newItem) {
+        const added = normalizeItem({ ...newItem, id: itemId, quantity, status: 'pending' });
+        if (!quantity || item || order.items.some(line =>
+          line.name.toLowerCase() === added.name.toLowerCase() ||
+          (added.sku && line.sku.toLowerCase() === added.sku.toLowerCase()))) {
+          throw storeError(409, 'order-conflict', 'That item already exists or has an invalid quantity. Review the order and try again.');
+        }
+        await tx.batch([
+          statement(writeItem, workspaceId, orderId, added.id, order.items.length, added.name, added.sku, added.unit,
+            quantity, added.status, JSON.stringify(added.aliases), added.nameHi, added.nameMr),
+          statement(incrementRevision, workspaceId, orderId),
+          statement(insertChange, workspaceId, orderId, added.id, added.name, 0, quantity, new Date().toISOString(), actor),
+        ]);
+        return getOrder(workspaceId, orderId, tx);
+      }
       if (!item) throw storeError(404, 'line-not-found', 'The order line could not be found.');
       if (item.status === 'shipped') throw storeError(409, 'line-shipped', 'This line has shipped and its quantity cannot change.');
       if (item.quantity === quantity) return order;
-      changeQuantity.run(quantity, workspaceId, orderId, item.id);
-      incrementRevision.run(workspaceId, orderId);
-      insertChange.run(workspaceId, orderId, item.id, item.name, item.quantity, quantity, new Date().toISOString(), actor);
-      return getOrder(workspaceId, orderId);
+      await tx.batch([
+        statement(changeQuantity, quantity, workspaceId, orderId, item.id),
+        statement(incrementRevision, workspaceId, orderId),
+        statement(insertChange, workspaceId, orderId, item.id, item.name, item.quantity, quantity, new Date().toISOString(), actor),
+      ]);
+      return getOrder(workspaceId, orderId, tx);
     });
   }
 
   function previewImport(workspaceId, actor, orders) {
     const normalized = normalizeOrders(orders);
-    return transaction(() => {
+    return transaction(async tx => {
       const now = Date.now();
-      purgeImports.run(now);
+      await tx.execute(statement(purgeImports, now));
       const importId = randomUUID();
       const counts = { created: 0, updated: 0, unchanged: 0, conflicts: 0 };
       const changes = [];
       const data = [];
+      const saved = await getOrdersForImport(tx, workspaceId, normalized.map(order => order.id));
       for (const order of normalized) {
-        const current = getOrder(workspaceId, order.id);
+        const current = saved.get(order.id);
         const compared = compareOrder(current, order);
         counts[compared.status === 'conflict' ? 'conflicts' : compared.status]++;
         changes.push({ id: order.id, status: compared.status, ...(compared.message ? { message: compared.message } : {}) });
         data.push({ order, revision: current?.revision ?? null });
       }
       const result = { importId, counts, changes };
-      insertImport.run(workspaceId, importId, actor, now, now + importLifetime, JSON.stringify(data), JSON.stringify(result));
+      await tx.execute(statement(insertImport, workspaceId, importId, actor, now, now + importLifetime, JSON.stringify(data), JSON.stringify(result)));
       return result;
     });
   }
 
   function commitImport(workspaceId, actor, importId) {
-    return transaction(() => {
-      const job = importById.get(workspaceId, importId, actor);
+    return transaction(async tx => {
+      const [job] = (await tx.execute(statement(importById, workspaceId, importId, actor))).rows;
       if (!job) throw storeError(404, 'import-not-found', 'This import preview could not be found.');
       const result = JSON.parse(job.result);
       if (job.committed_at !== null) return result;
       if (job.expires_at <= Date.now()) throw storeError(409, 'import-expired', 'This preview expired. Upload the file to review it again.');
       if (result.counts.conflicts) throw storeError(409, 'import-conflict', 'Resolve the order conflicts and preview the file again.');
-      const entries = JSON.parse(job.data).map(({ order, revision }) => {
-        const current = getOrder(workspaceId, order.id);
+      const preview = JSON.parse(job.data);
+      const saved = await getOrdersForImport(tx, workspaceId, preview.map(({ order }) => order.id));
+      const entries = preview.map(({ order, revision }) => {
+        const current = saved.get(order.id);
         if ((current?.revision ?? null) !== revision) {
           throw storeError(409, 'import-stale', 'An order changed since the preview. Upload the file to review the latest orders.');
         }
@@ -282,49 +347,122 @@ export function createStore(path = process.env.DISPATCH_DB_PATH || '.dispatch/di
         return { current, ...compared };
       });
       const at = new Date().toISOString();
+      const writes = [];
       for (const { current, status, order } of entries) {
         if (status === 'unchanged') continue;
-        writeOrder.run(workspaceId, order.id, order.customer, (current?.revision ?? 0) + 1);
+        writes.push(statement(writeOrder, workspaceId, order.id, order.customer, (current?.revision ?? 0) + 1));
         const previous = new Map(current?.items.map(item => [item.id, item]));
         for (const [position, item] of order.items.entries()) {
-          writeItem.run(workspaceId, order.id, item.id, position, item.name, item.sku, item.unit, item.quantity,
-            item.status, JSON.stringify(item.aliases), item.nameHi, item.nameMr);
+          writes.push(statement(writeItem, workspaceId, order.id, item.id, position, item.name, item.sku, item.unit, item.quantity,
+            item.status, JSON.stringify(item.aliases), item.nameHi, item.nameMr));
           const before = previous.get(item.id);
           if (before && before.quantity !== item.quantity) {
-            insertChange.run(workspaceId, order.id, item.id, item.name, before.quantity, item.quantity, at, actor);
+            writes.push(statement(insertChange, workspaceId, order.id, item.id, item.name, before.quantity, item.quantity, at, actor));
           }
         }
       }
-      finishImport.run(Date.now(), workspaceId, importId);
+      writes.push(statement(finishImport, Date.now(), workspaceId, importId));
+      for (let i = 0; i < writes.length; i += 200) await tx.batch(writes.slice(i, i + 200));
       return result;
     });
   }
 
+  function decodeCall(row) {
+    return row ? { ...row, state: JSON.parse(row.state) } : null;
+  }
+
+  async function getCall(id, actor) {
+    if (!id) return null;
+    const result = await db.execute(statement(`SELECT ${callFields} FROM call_sessions WHERE ${callMatch}`,
+      id, actor.sessionId, actor.workspaceId, Date.now()));
+    return decodeCall(result.rows[0]);
+  }
+
+  async function createCall(actor, state) {
+    const now = Date.now();
+    const call = { id: randomUUID(), owner: actor.sessionId, workspaceId: actor.workspaceId, state, revision: 0 };
+    await db.batch([
+      statement('DELETE FROM call_sessions WHERE expires_at <= ?', now),
+      statement('INSERT INTO call_sessions (id, owner, workspace_id, state, revision, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+        call.id, call.owner, call.workspaceId, JSON.stringify(state), call.revision, now + callLifetime),
+    ], 'write');
+    return call;
+  }
+
+  async function lockCall(id, actor) {
+    const now = Date.now();
+    const lock = randomUUID();
+    const result = await db.execute(statement(`UPDATE call_sessions SET lock_token = ?, lock_until = ?, expires_at = ?
+      WHERE ${callMatch} AND lock_until <= ? RETURNING ${callFields}`,
+      lock, now + lockLifetime, now + callLifetime, id, actor.sessionId, actor.workspaceId, now, now));
+    const call = decodeCall(result.rows[0]);
+    return call ? { ...call, lock } : null;
+  }
+
+  async function saveCall(call) {
+    const result = await db.execute(statement(`UPDATE call_sessions SET state = ?, revision = ?, expires_at = ?,
+      lock_token = NULL, lock_until = 0 WHERE id = ? AND lock_token = ?`,
+    JSON.stringify(call.state), call.revision, Date.now() + callLifetime, call.id, call.lock));
+    if (!result.rowsAffected) throw storeError(409, 'session-stale', 'The call changed. Review the latest order and try again.');
+  }
+
+  async function rateLimit(key, max, windowMs) {
+    const now = Date.now();
+    const [, result] = await db.batch([
+      statement('DELETE FROM request_limits WHERE until_at <= ?', now),
+      statement(`INSERT INTO request_limits (key, count, until_at) VALUES (?, 1, ?)
+        ON CONFLICT(key) DO UPDATE SET count = count + 1 WHERE count < ? RETURNING count`, key, now + windowMs, max),
+    ], 'write');
+    return result.rows.length > 0;
+  }
+
   return {
     close: () => db.close(),
-    listOrders(workspaceId, { query = '', limit = 50 } = {}) {
+    async listOrders(workspaceId, { query = '', limit = 50 } = {}) {
       const filter = typeof query === 'string' ? query.trim().slice(0, 120) : '';
       const size = Number.isSafeInteger(limit) ? Math.min(100, Math.max(1, limit)) : 50;
-      return list.all(workspaceId, filter, filter, size).map(row => ({ ...row }));
+      return (await db.execute(statement(list, workspaceId, filter, filter, size))).rows.map(row => ({ ...row }));
     },
     getOrder,
     saveQuantity,
     previewImport,
     commitImport,
-    createAuthSession(workspaceId, user, tokenHash, expiresAt) {
-      purgeAuth.run(Date.now());
-      insertAuth.run(workspaceId, user, tokenHash, expiresAt);
+    getCall,
+    createCall,
+    lockCall,
+    saveCall,
+    unlockCall: call => db.execute(statement('UPDATE call_sessions SET lock_token = NULL, lock_until = 0 WHERE id = ? AND lock_token = ?', call.id, call.lock)),
+    deleteCalls: owner => db.execute(statement('DELETE FROM call_sessions WHERE owner = ?', owner)),
+    rateLimit,
+    async getRate(key) {
+      const result = await db.execute(statement('SELECT count, until_at AS until FROM request_limits WHERE key = ? AND until_at > ?', key, Date.now()));
+      return result.rows[0];
     },
-    getAuthSession(tokenHash) {
-      const row = authByToken.get(tokenHash, Date.now());
+    clearRate: key => db.execute(statement('DELETE FROM request_limits WHERE key = ?', key)),
+    createAuthSession(workspaceId, user, tokenHash, expiresAt) {
+      return db.batch([statement(purgeAuth, Date.now()), statement(insertAuth, workspaceId, user, tokenHash, expiresAt)], 'write');
+    },
+    async getAuthSession(tokenHash) {
+      const [row] = (await db.execute(statement(authByToken, tokenHash, Date.now()))).rows;
       return row ? { ...row } : null;
     },
-    deleteAuthSession: tokenHash => { deleteAuth.run(tokenHash); },
+    deleteAuthSession: tokenHash => db.execute(statement(deleteAuth, tokenHash)),
   };
 }
 
 const storeKey = Symbol.for('dispatch-desk.production-store');
 
 export function getStore() {
-  return (globalThis[storeKey] ??= createStore());
+  if (!globalThis[storeKey]) {
+    const url = process.env.TURSO_DATABASE_URL?.trim();
+    const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
+    if ((process.env.VERCEL || url || authToken) && (!url || !authToken)) {
+      throw storeError(503, 'database-unconfigured', 'Configure the hosted database to open Dispatch Desk.');
+    }
+    globalThis[storeKey] = createStore(undefined, url ? { url, authToken } : null).catch(error => {
+      delete globalThis[storeKey];
+      throw error;
+    });
+  }
+  return globalThis[storeKey];
 }

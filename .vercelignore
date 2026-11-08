@@ -1,0 +1,9 @@
+.git/
+.vercel/
+.env
+.env.*
+.dispatch/
+.impeccable/review/
+node_modules/
+.next/
+.next-test/

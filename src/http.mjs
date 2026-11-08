@@ -1,15 +1,13 @@
-import { randomUUID } from 'node:crypto';
 import { createSession, handleTurn, snapshot } from './orders.mjs';
 import { synthesize, transcribe, voiceAvailable } from './gnani.mjs';
 import { ollamaEnabled, personalizeReply, warmOllama } from './ollama.mjs';
+import { groqEnabled, selectGroqReply } from './groq.mjs';
 import { authenticate, authConfigured, authLogin, authLogout, assertSameOrigin } from './auth.mjs';
 import { getStore } from './store.mjs';
 import { inspectOrderImport, parseOrderImport, orderTemplate } from './order-import.mjs';
 
 const locales = new Set(['mr-IN', 'hi-IN', 'en-IN']);
-const sessionLifetime = 2 * 60 * 60 * 1000;
-const sessionLimit = 150;
-const uploadLimit = 5 * 1024 * 1024;
+const uploadLimit = (process.env.VERCEL ? 4 : 5) * 1024 * 1024;
 const responseHeaders = {
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
@@ -73,8 +71,7 @@ async function readJson(request) {
 
 }
 
-async function readText(request) {
-  const body = await readJson(request);
+function readText(body) {
   const text = typeof body?.text === 'string' ? body.text.trim() : '';
   if (!text || text.length > 500) {
     throw new RequestError(400, 'Enter a message between 1 and 500 characters.');
@@ -85,32 +82,21 @@ async function readText(request) {
   return { text, language: body.language };
 }
 
-function lookupSession(sessions, id) {
-  const now = Date.now();
-  for (const [key, value] of sessions) {
-    if (now - value.seenAt > sessionLifetime) sessions.delete(key);
-  }
-  const session = sessions.get(id);
-  if (session) {
-    session.seenAt = now;
-    session.revision ??= 0;
-  }
-  return session;
+function replyProviders() {
+  return [
+    ...(groqEnabled() ? ['groq'] : []),
+    ...['ollama', 'ollama-dhee'].filter(ollamaEnabled),
+    'rules',
+  ];
 }
 
-function newSession(sessions, actor, order, language) {
-  if (sessions.size >= sessionLimit) {
-    let oldestIdle;
-    for (const entry of sessions) {
-      if (!entry[1].busy && (!oldestIdle || entry[1].seenAt < oldestIdle[1].seenAt)) oldestIdle = entry;
-    }
-    if (!oldestIdle) throw new RequestError(503, 'The desk is busy. Please try again shortly.');
-    sessions.delete(oldestIdle[0]);
+async function styleOrderReply({ provider, ...input }) {
+  if (provider === 'ollama' || provider === 'ollama-dhee') return personalizeReply({ provider, ...input });
+  if (provider === 'groq') {
+    const reply = await selectGroqReply(input);
+    if (reply) return { reply, source: 'groq' };
   }
-  const id = randomUUID();
-  const session = { id, owner: actor.sessionId, workspaceId: actor.workspaceId, state: createSession(order, language), revision: 0, seenAt: Date.now(), busy: false };
-  sessions.set(id, session);
-  return session;
+  return { reply: input.reply, source: 'rules' };
 }
 
 function sessionData(session) {
@@ -120,14 +106,9 @@ function sessionData(session) {
     voiceEnabled: voiceAvailable(),
     voiceAutoLanguage: process.env.GNANI_STT_MODEL !== 'prisma-v2.5',
     ollamaEnabled: ollamaEnabled(),
+    replyProviders: replyProviders(),
     ...snapshot(session.state),
   };
-}
-
-function assertIdle(session, request) {
-  if (!session.busy) return;
-  discardBody(request);
-  throw new RequestError(409, 'Wait for the current reply, then try again.', 'session-busy');
 }
 
 function assertRevision(session, request) {
@@ -172,7 +153,7 @@ async function voiceRoute(request, action, session) {
       return json(await transcribe(input, { language, signal }));
     }
 
-    const { text, language } = await readText(request);
+    const { text, language } = readText(await readJson(request));
     const reply = session.state.messages.at(-1);
     if (reply?.role !== 'agent' || reply.text !== text || reply.language !== language) {
       throw new RequestError(409, 'Only the current desk reply can be played.');
@@ -229,8 +210,8 @@ function publicUser(actor) {
   return actor ? { name: actor.user, role: actor.role } : null;
 }
 
-function requireOrder(store, workspaceId, id) {
-  const order = store.getOrder(workspaceId, id);
+async function requireOrder(store, workspaceId, id) {
+  const order = await store.getOrder(workspaceId, id);
   if (!order) throw new RequestError(404, 'Order not found.');
   return order;
 }
@@ -254,22 +235,26 @@ function encodedHeader(request, key, limit) {
 }
 
 export function createDispatchHandlers({
-  sessions = new Map(), store = null, identify = authenticate,
-  styleReply = personalizeReply, warmReplyModel = () => {},
+  store = null, identify = authenticate,
+  styleReply = styleOrderReply, warmReplyModel = () => {},
 } = {}) {
   const database = () => store ?? getStore();
-  const speechLimits = new Map();
-  const protectedRoute = (action, { sessionRequired = false, admin = false, operation } = {}) => async (request) => {
+  const protectedRoute = (action, { sessionRequired = false, lock = false, admin = false, operation } = {}) => async (request) => {
+    let db;
+    let session;
     try {
       if (request.method !== 'GET') assertSameOrigin(request);
-      const db = database();
-      const actor = identify(request, db);
+      db = await database();
+      const actor = await identify(request, db);
       if (!actor) throw new RequestError(401, 'Sign in to continue.', 'sign-in-required');
       if (admin && actor.role !== 'admin') throw new RequestError(403, 'Only administrators can import orders.');
-      let session;
       if (sessionRequired) {
-        session = lookupSession(sessions, request.headers.get('x-session-id'));
-        if (!session || session.owner !== actor.sessionId || session.workspaceId !== actor.workspaceId) {
+        const id = request.headers.get('x-session-id');
+        session = lock ? await db.lockCall(id, actor) : await db.getCall(id, actor);
+        if (!session) {
+          if (lock && await db.getCall(id, actor)) {
+            throw new RequestError(409, 'Wait for the current reply, then try again.', 'session-busy');
+          }
           throw new RequestError(409, 'This call has expired. Reopen the order to continue.', 'session-expired');
         }
       }
@@ -280,23 +265,22 @@ export function createDispatchHandlers({
         reportFailure(operation, error?.status ?? 500);
       }
       return requestError(error);
+    } finally {
+      if (session?.lock) await db.unlockCall(session).catch(() => {});
     }
   };
-  const speechRoute = (action) => protectedRoute((request, { actor, session }) => {
-    const now = Date.now();
-    for (const [id, entry] of speechLimits) if (entry.until <= now) speechLimits.delete(id);
-    const limit = speechLimits.get(actor.sessionId) ?? { count: 0, until: now + 60_000 };
-    if (limit.count >= 40) throw new RequestError(429, 'Voice request limit reached. Wait a moment or continue by text.');
-    limit.count++;
-    speechLimits.set(actor.sessionId, limit);
+  const speechRoute = (action) => protectedRoute(async (request, { db, actor, session }) => {
+    if (!await db.rateLimit('voice:' + actor.sessionId, 40, 60_000)) {
+      throw new RequestError(429, 'Voice request limit reached. Wait a moment or continue by text.');
+    }
     return voiceRoute(request, action, session);
   }, { sessionRequired: true, operation: `voice.${action}` });
 
   return {
-    auth(request) {
+    async auth(request) {
       try {
         const configured = authConfigured();
-        return json({ configured, user: configured ? publicUser(identify(request, database())) : null });
+        return json({ configured, user: configured ? publicUser(await identify(request, await database())) : null, maxImportBytes: uploadLimit });
       } catch (error) {
         return requestError(error);
       }
@@ -304,7 +288,7 @@ export function createDispatchHandlers({
     async signIn(request) {
       try {
         assertSameOrigin(request);
-        return await authLogin(request, database());
+        return await authLogin(request, await database());
       } catch (error) {
         return requestError(error);
       }
@@ -312,88 +296,107 @@ export function createDispatchHandlers({
     async signOut(request) {
       try {
         assertSameOrigin(request);
-        const db = database();
-        const actor = identify(request, db);
-        if (actor) for (const [id, session] of sessions) if (session.owner === actor.sessionId) sessions.delete(id);
+        const db = await database();
+        const actor = await identify(request, db);
+        if (actor) await db.deleteCalls(actor.sessionId);
         return await authLogout(request, db);
       } catch (error) {
         return requestError(error);
       }
     },
-    orders: protectedRoute((request, { db, actor }) => {
+    orders: protectedRoute(async (request, { db, actor }) => {
       const query = new URL(request.url).searchParams.get('q')?.trim().slice(0, 120);
-      return json({ orders: db.listOrders(actor.workspaceId, { query, limit: 100 }) });
+      return json({ orders: await db.listOrders(actor.workspaceId, { query, limit: 100 }) });
     }),
-    session: protectedRoute((request, { db, actor }) => {
+    session: protectedRoute(async (request, { db, actor }) => {
       const params = new URL(request.url).searchParams;
       const orderId = params.get('orderId');
       if (!orderId || orderId.length > 120) throw new RequestError(400, 'Choose an order first.');
       const language = params.get('language') ?? undefined;
       if (language !== undefined && !locales.has(language)) throw new RequestError(400, 'Choose Hindi, Marathi, or English.');
-      const order = requireOrder(db, actor.workspaceId, orderId);
-      let session = lookupSession(sessions, request.headers.get('x-session-id'));
-      if (!session || session.owner !== actor.sessionId || session.workspaceId !== actor.workspaceId || session.state.order.id !== order.id) {
-        session = newSession(sessions, actor, order, language);
-      } else if (!session.busy) {
-        refreshOrder(session, order);
+      const order = await requireOrder(db, actor.workspaceId, orderId);
+      let session = await db.getCall(request.headers.get('x-session-id'), actor);
+      if (!session || session.state.order.id !== order.id || session.state.order.revision !== order.revision) {
+        session = await db.createCall(actor, createSession(order, language));
       }
       void warmReplyModel();
       return json(sessionData(session));
     }),
     turn: protectedRoute(async (request, { db, actor, session }) => {
-      assertIdle(session, request);
-      session.busy = true;
-      try {
-        assertRevision(session, request);
-        const input = await readText(request);
-        if (request.signal.aborted) throw new RequestError(408, 'The message was cancelled.');
-        const order = requireOrder(db, actor.workspaceId, session.state.order.id);
-        if (session.state.order.revision !== order.revision) {
-          refreshOrder(session, order);
-          throw new RequestError(409, 'The order changed. Refresh and review it before continuing.', 'order-stale');
-        }
-        const previousReply = session.state.messages.at(-1)?.text;
-        const candidate = structuredClone(session.state);
-        const result = handleTurn(candidate, input);
-        const originalQuantities = new Map(order.items.map((item) => [item.id, item.quantity]));
-        const edited = candidate.order.items.find((item) => item.quantity !== originalQuantities.get(item.id));
-        if (edited) {
-          const saved = db.saveQuantity(actor.workspaceId, order.id, {
-            itemId: edited.id, quantity: edited.quantity, revision: order.revision, actor: actor.user,
-          });
-          const { history, ...record } = saved;
-          candidate.order = record;
-          candidate.history = history;
-        }
-        session.state = candidate;
-        session.revision++;
-        const message = session.state.messages.at(-1);
-        let styled;
+      assertRevision(session, request);
+      const body = await readJson(request);
+      const input = readText(body);
+      if (body.itemAction !== undefined && !['add', 'remove'].includes(body.itemAction?.type)) {
+        throw new RequestError(400, 'Choose an item action.');
+      }
+      const providers = replyProviders();
+      const provider = body.replyProvider ?? providers[0];
+      if (!providers.includes(provider)) throw new RequestError(400, 'Choose an available reply provider.');
+      if (request.signal.aborted) throw new RequestError(408, 'The message was cancelled.');
+      const order = await requireOrder(db, actor.workspaceId, session.state.order.id);
+      if (session.state.order.revision !== order.revision) {
+        refreshOrder(session, order);
+        await db.saveCall(session);
+        delete session.lock;
+        throw new RequestError(409, 'The order changed. Refresh and review it before continuing.', 'order-stale');
+      }
+      const previousReply = session.state.messages.at(-1)?.text;
+      const candidate = structuredClone(session.state);
+      const { choices, change, rejectedChange, ...result } = handleTurn(candidate, { ...input, itemAction: body.itemAction });
+      const requireDhee = provider === 'ollama-dhee';
+      const variants = requireDhee && choices
+        ? choices.options.map(option => [choices.prefix, option.replace('{amount}', () => choices.amount)].filter(Boolean).join(' '))
+        : [];
+      async function styleTurn() {
         try {
-          styled = await styleReply({
+          const styled = await styleReply({
+            provider,
+            choices,
+            variants,
+            rejectedChange,
             text: input.text,
             reply: result.reply,
             language: result.language,
             previousReply,
             signal: request.signal,
           });
+          if (!request.signal.aborted && provider !== 'rules' && styled?.source === provider &&
+              typeof styled.reply === 'string' &&
+              (provider === 'groq' || variants.includes(styled.reply) || styled.reply.endsWith(result.reply))) {
+            return styled;
+          }
         } catch {
-          // A styling failure cannot undo or duplicate an accepted order operation.
+          // A provider failure is handled below according to the selected provider.
         }
-        const useStyle = !request.signal.aborted && styled?.source === 'ollama' &&
-          typeof styled.reply === 'string' && styled.reply.endsWith(result.reply);
-        const reply = useStyle ? styled.reply : result.reply;
-        message.text = reply;
-        return json({
-          ...sessionData(session),
-          ...result,
-          reply,
-          replySource: useStyle ? 'ollama' : 'rules',
-        });
-      } finally {
-        session.busy = false;
+        return null;
       }
-    }, { sessionRequired: true, operation: 'order.turn' }),
+      const dheeReply = requireDhee ? await styleTurn() : null;
+      if (requireDhee && !dheeReply) {
+        if (request.signal.aborted) throw new RequestError(408, 'The message was cancelled.');
+        throw new RequestError(503, 'Dhee could not finish the reply. Check that Ollama is running, then retry.', 'dhee-unavailable');
+      }
+      if (change) {
+        const saved = await db.saveQuantity(actor.workspaceId, order.id, {
+          itemId: change.itemId, quantity: change.to, newItem: change.newItem, revision: order.revision, actor: actor.user,
+        });
+        const { history, ...record } = saved;
+        candidate.order = record;
+        candidate.history = history;
+      }
+      session.state = candidate;
+      session.revision++;
+      const styled = requireDhee ? dheeReply : await styleTurn();
+      const reply = styled?.reply ?? result.reply;
+      session.state.messages.at(-1).text = reply;
+      await db.saveCall(session);
+      delete session.lock;
+      return json({
+        ...sessionData(session),
+        ...result,
+        reply,
+        replySource: styled?.source ?? 'rules',
+      });
+    }, { sessionRequired: true, lock: true, operation: 'order.turn' }),
     transcribe: speechRoute('transcribe'),
     speak: speechRoute('speak'),
     imports: protectedRoute(async (request, { db, actor }) => {
@@ -402,7 +405,7 @@ export function createDispatchHandlers({
       if (phase === 'commit') {
         const input = await readJson(request);
         if (typeof input?.importId !== 'string' || input.importId.length > 100) throw new RequestError(400, 'Choose an import preview.');
-        return json(db.commitImport(actor.workspaceId, actor.user, input.importId));
+        return json(await db.commitImport(actor.workspaceId, actor.user, input.importId));
       }
       if (phase !== 'inspect' && phase !== 'preview') throw new RequestError(400, 'Choose an import step.');
       const filename = encodedHeader(request, 'x-filename', 1_024);
@@ -425,7 +428,7 @@ export function createDispatchHandlers({
         reportFailure('order.import.validation', 422);
         return json({ errors, importId: null, counts: { created: 0, updated: 0, unchanged: 0, conflicts: 0 }, changes: [] });
       }
-      return json({ errors: [], ...db.previewImport(actor.workspaceId, actor.user, orders) });
+      return json({ errors: [], ...await db.previewImport(actor.workspaceId, actor.user, orders) });
     }, { admin: true, operation: 'order.import' }),
     template: protectedRoute(async (request) => {
       const format = new URL(request.url).searchParams.get('format');
@@ -438,8 +441,4 @@ export function createDispatchHandlers({
   };
 }
 
-// Next may load route entry points in separate module bundles in the same Node process.
-// In-memory call state is shared by routes in one process. Orders live in SQLite.
-const storeKey = Symbol.for('dispatch-desk.sessions');
-const sessions = (globalThis[storeKey] ??= new Map());
-export const dispatchHandlers = createDispatchHandlers({ sessions, warmReplyModel: warmOllama });
+export const dispatchHandlers = createDispatchHandlers({ warmReplyModel: warmOllama });

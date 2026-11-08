@@ -15,6 +15,8 @@ Open [Dispatch Desk](http://127.0.0.1:3000) and sign in. For a production-mode r
 
 Choose Marathi, Hindi, or English using the language selector on the order screen. The desk uses that language to listen and reply until you select another one. You can change the language during a call from the same selector.
 
+Use **Add item** on the order ticket to enter a name, quantity, and unit, or use **Remove** on an editable line. Review and confirm each change to save it. You can also say or type a request such as “Add two boxes of green tea” or “Remove green tea.” Adding a new item by conversation requires an explicit quantity and unit. Shipped items stay locked, and the change log keeps a record of confirmed additions and removals.
+
 ## Import orders
 
 1. Sign in as an administrator and open **Import orders**. Download a blank CSV, Excel, or JSON template, or upload an export from your order system.
@@ -29,22 +31,27 @@ Choose Marathi, Hindi, or English using the language selector on the order scree
 | Fulfillment status | Yes | Use `pending` or `shipped`. |
 | Aliases, Item name (Hindi), Item name (Marathi) | No | Add local product names or spoken variants for recognition. Separate aliases with `\|` in a spreadsheet or use an array in JSON. |
 
-CSV files use UTF-8. Excel uploads use `.xlsx` with plain values, one line item per row, and a header row. Save formula results as values before uploading. JSON accepts a versioned object shaped like `{ "version": 1, "orders": [] }`. Each order has `id`, `customer`, and `items`. Each item has `id`, `name` or `sku`, `quantity`, `unit`, and `status`, with optional `aliases`, `nameHi`, and `nameMr`. A flat JSON array may instead use `orderId`, `customer`, `lineId`, and the same item fields. Each import accepts up to 5 MiB, 2,000 orders, and 5,000 line items. Tabular files can have up to 40 columns.
+CSV files use UTF-8. Excel uploads use `.xlsx` with plain values, one line item per row, and a header row. Save formula results as values before uploading. JSON accepts a versioned object shaped like `{ "version": 1, "orders": [] }`. Each order has `id`, `customer`, and `items`. Each item has `id`, `name` or `sku`, `quantity`, `unit`, and `status`, with optional `aliases`, `nameHi`, and `nameMr`. A flat JSON array may instead use `orderId`, `customer`, `lineId`, and the same item fields. Each import accepts up to 2,000 orders and 5,000 line items. The file limit is 4 MiB on Vercel and 5 MiB locally. Tabular files can have up to 40 columns.
 
 Matching order and line IDs update existing records. New IDs add records and omitted lines are retained. Identical reuploads are unchanged. Shipped-line edits, conflicting duplicates, and stale previews require review before a new import can commit. A commit writes the whole batch in one transaction.
 
 ## Deploy and operate
 
-- Run one long-lived Node process per workspace. Use a stable `DISPATCH_WORKSPACE_ID` and point `DISPATCH_DB_PATH` at a persistent, access-controlled volume. The local default is `.dispatch/dispatch.sqlite`.
+- On Vercel, connect a Turso database that supplies `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Configure the hosted admin credentials and exact production origin in the project environment. Local Ollama is available when running Dispatch Desk on the same computer as Ollama. Hosted replies can use Groq and the built-in wording.
+- For self-hosting, run one Node process per workspace. Use a stable `DISPATCH_WORKSPACE_ID` and point `DISPATCH_DB_PATH` at a persistent, access-controlled volume. The local default is `.dispatch/dispatch.sqlite`.
 - Serve the app behind an HTTPS reverse proxy and set `DISPATCH_PUBLIC_ORIGIN` to its exact public origin. This enables secure session cookies. Inject credentials from the host’s secrets store and restrict database, backup, and log access to operators who need it. Changing the account configuration invalidates existing sign-ins.
-- Schedule encrypted, access-controlled SQLite backups using SQLite’s online backup API, or stop the app cleanly before taking a database snapshot. For recovery, stop the app, move the existing database and any `-wal` and `-shm` files to a recovery directory, restore a consistent snapshot to the configured path, and verify the order list and change history after restart.
+- Use the database provider’s backup and recovery controls on Vercel. For self-hosting, schedule encrypted, access-controlled SQLite backups using SQLite’s online backup API, or stop the app cleanly before taking a database snapshot. To recover a self-hosted database, stop the app, move the existing database and any `-wal` and `-shm` files to a recovery directory, restore a consistent snapshot to the configured path, and verify the order list and change history after restart.
 - Collect server logs and alert on repeated `dispatch_operation_failed` events. They include operation names and statuses. Raw uploads and call content are excluded from these events. Committed import records retain the actor, time, and affected order references. Quantity changes are visible in the order’s history.
-- Call state and transcripts live in server memory for the active session. A restart requires reopening the order. The order and its committed changes persist.
+- Call state and transcripts are stored in the configured database. A call expires after two hours without a completed turn. Signing out removes that browser session’s calls, and expired calls are removed when a new call opens. Orders and committed changes are retained.
 - Gnani receives audio for transcription and reply text for synthesis when voice is used. These can contain customer or order details. With optional Ollama styling enabled, caller text and reply text are sent to the locally configured Ollama endpoint. Choose an endpoint you control and apply your organization’s data handling requirements before using real orders.
 
-## Optional local reply styling
+## Choose a reply provider
 
-With [Ollama](https://ollama.com/download/windows) running, run `ollama pull qwen3.5:4b`, set `OLLAMA_ENABLED=1`, and restart the app. Qwen chooses from vetted acknowledgments in the caller’s language. The order engine validates edits and generates the order details and confirmation. If Ollama is unavailable or slow, the desk uses its standard wording.
+Use **Reply provider** above the conversation. Set `GROQ_API_KEY` in `.env.local` and restart to enable Groq Qwen 3.8 27B. The desk defaults to Groq when configured. Groq selects from complete approved lines for proposals and saved changes. The request contains generic wording and the selected language. The desk inserts the actual order details locally.
+
+For local styling, start Ollama, run `ollama pull qwen3.5:4b`, set `OLLAMA_ENABLED=1`, and restart the app. Local Qwen chooses from vetted acknowledgments. Select **Built-in** to use the desk’s standard wording. The desk also uses that wording when a model is unavailable, times out, or returns an invalid choice. The label next to the selector shows the provider used for the last reply. [Ollama for Windows](https://ollama.com/download/windows)
+
+To try **Local · Dhee 4B (8-bit)**, import the Q8 GGUF into Ollama as `dhee-indic:q8` and set `OLLAMA_DHEE_ENABLED=1` alongside `OLLAMA_ENABLED=1` in `.env.local`. Select it from **Reply provider** on an open order. Dhee chooses from vetted proposals, clarifications, and polite redirects in the call’s language. The desk checks quantities, units, and shipment status before it offers a change. A Dhee turn waits up to 45 seconds for Ollama, including time to load the model. If Dhee fails, resubmit the turn. The desk saves the turn and any confirmed edit after Dhee responds successfully.
 
 ## Verify
 

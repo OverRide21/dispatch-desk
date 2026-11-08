@@ -26,7 +26,7 @@ test('voice routes keep the selected language through transcription and playback
     }
     assert.equal(target.pathname, '/api/v1/tts/sse');
     const payload = await request.json();
-    calls.push({ path: target.pathname, key, text: payload.text, language: payload.language });
+    calls.push({ path: target.pathname, key, text: payload.text, language: payload.language, voice: payload.voice, model: payload.model });
     if (behavior === 'rate') return new Response(null, { status: 429 });
     const headers = { 'Content-Type': 'text/event-stream' };
     if (behavior === 'interrupt') {
@@ -42,12 +42,14 @@ test('voice routes keep the selected language through transcription and playback
     return new Response('event: start\ndata: {}\n\n' + audioChunk + 'event: complete\ndata: {"is_final":true}\n\n', { headers });
   });
 
-  const handlers = createDispatchHandlers({ store: fixtureStore(context), identify: () => actor });
+  const handlers = createDispatchHandlers({ store: await fixtureStore(context), identify: () => actor });
   const open = async () => (await handlers.session(new Request(dispatch + '/api/session?orderId=' + orderId + '&language=mr-IN'))).json();
   const original = {
     GNANI_API_KEY: process.env.GNANI_API_KEY,
     GNANI_BASE_URL: process.env.GNANI_BASE_URL,
     GNANI_STT_MODEL: process.env.GNANI_STT_MODEL,
+    GNANI_TTS_MODEL: process.env.GNANI_TTS_MODEL,
+    GNANI_TTS_VOICE: process.env.GNANI_TTS_VOICE,
   };
   context.after(() => {
     for (const [name, value] of Object.entries(original)) {
@@ -70,6 +72,8 @@ test('voice routes keep the selected language through transcription and playback
   process.env.GNANI_API_KEY = 'test-credential';
   process.env.GNANI_BASE_URL = provider;
   process.env.GNANI_STT_MODEL = 'prisma-v3.0';
+  delete process.env.GNANI_TTS_MODEL;
+  delete process.env.GNANI_TTS_VOICE;
   assert.equal((await open()).voiceEnabled, true);
 
   const wav = Buffer.alloc(46);
@@ -107,7 +111,7 @@ test('voice routes keep the selected language through transcription and playback
   assert.deepEqual(Buffer.from(await spoken.arrayBuffer()), Buffer.from([1, 2, 3, 4]));
   assert.deepEqual(calls, [
     { path: '/stt/v3', key: 'test-credential', language: 'mr-IN', audio: wav },
-    { path: '/api/v1/tts/sse', key: 'test-credential', language: 'mr-IN', text: turn.reply },
+    { path: '/api/v1/tts/sse', key: 'test-credential', language: 'mr-IN', text: turn.reply, voice: 'Yashraj', model: 'timbre-v3.0' },
   ]);
   behavior = 'rate';
   assert.equal((await speak(turn.reply)).status, 429);

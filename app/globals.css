@@ -228,6 +228,10 @@ a { color: inherit; text-underline-offset: 0.22em; }
 .conversation-head, .history-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.55rem; }
 .conversation-head h2 { margin: 0; font-size: 1.13rem; line-height: 1.2; letter-spacing: -0.025em; }
 .turn-count, .history-head span { color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.reply-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 0.65rem; margin-top: 0.58rem; font-size: 0.8rem; }
+.reply-settings label { font-weight: 650; }
+.reply-settings select { min-height: 42px; max-width: 100%; padding: 0.3rem 0.5rem; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--cream); font: inherit; }
+.reply-settings span { color: var(--muted); }
 .transcript {
   height: clamp(11.1rem, 27vh, 16rem);
   margin: 0.68rem 0 0;
@@ -334,6 +338,14 @@ a { color: inherit; text-underline-offset: 0.22em; }
 .ticket-identity { display: grid; margin-top: 0.65rem; margin-bottom: 0.65rem; }
 .ticket-id { font-family: Georgia, serif; font-size: clamp(1.9rem, 3vw, 2.62rem); font-weight: 700; line-height: 1.04; letter-spacing: -0.035em; overflow-wrap: anywhere; }
 .ticket-customer { margin-top: 0.22rem; color: var(--muted); font-size: 0.83rem; overflow-wrap: anywhere; }
+.ticket-actions { display: flex; justify-content: flex-end; margin-bottom: 0.45rem; }
+.add-item-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; padding: 0.65rem; margin-bottom: 0.6rem; border: 1px solid var(--line); border-radius: 8px; }
+.add-item-form label { display: grid; gap: 0.22rem; font-size: 0.78rem; font-weight: 650; }
+.add-item-form input, .add-item-form select { min-width: 0; width: 100%; min-height: 40px; padding: 0.35rem 0.45rem; border: 1px solid var(--line); border-radius: 6px; background: var(--cream); color: var(--ink); font: inherit; }
+.add-item-form .add-item-name, .add-item-form button { grid-column: 1 / -1; }
+.remove-item { display: block; margin-left: auto; padding: 0.35rem 0.22rem; border: 0; background: transparent; color: var(--red); font: inherit; cursor: pointer; text-decoration: underline; }
+.remove-item:disabled { opacity: 0.55; cursor: not-allowed; }
+.ticket-confirm { margin-top: 0.55rem; }
 .order-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; text-align: left; }
 .order-table th, .order-table td { padding: 0.52rem 0.16rem; vertical-align: middle; border-bottom: 1px solid #ecd5c3; }
 .order-table th:last-child, .order-table td:last-child { text-align: right; }

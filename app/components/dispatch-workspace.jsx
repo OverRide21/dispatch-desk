@@ -57,7 +57,7 @@ function SignIn({ configured, onSignIn, notice }) {
   );
 }
 
-function OrderList({ user, onOpen, onUnauthorized }) {
+function OrderList({ user, maxImportBytes, onOpen, onUnauthorized }) {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState({ query: '', revision: 0 });
   const [results, setResults] = useState(null);
@@ -99,7 +99,7 @@ function OrderList({ user, onOpen, onUnauthorized }) {
         {canImport && <button className="action action-primary" type="button" aria-expanded={showImport}
           onClick={() => setShowImport((visible) => !visible)}>{showImport ? 'Close import' : 'Import orders'}</button>}
       </div>
-      {showImport && canImport && <OrderImport onUnauthorized={onUnauthorized} onComplete={({ counts }) => {
+      {showImport && canImport && <OrderImport maxFileBytes={maxImportBytes} onUnauthorized={onUnauthorized} onComplete={({ counts }) => {
         setShowImport(false);
         setImportNotice(`Import complete. ${counts.created} created, ${counts.updated} updated, ${counts.unchanged} unchanged.`);
         setInput('');
@@ -147,7 +147,7 @@ export default function DispatchWorkspace({ OrderCall }) {
   const [orderId, setOrderId] = useState('');
   const onUnauthorized = useCallback(() => {
     setOrderId('');
-    setAuth({ user: null, configured: true });
+    setAuth((previous) => ({ ...previous, user: null }));
     setError('Your sign-in expired. Sign in to continue.');
   }, []);
 
@@ -166,9 +166,9 @@ export default function DispatchWorkspace({ OrderCall }) {
     setOrderId('');
     try {
       await workspaceRequest('/api/auth', { method: 'DELETE' });
-      setAuth({ user: null, configured: true });
+      setAuth((previous) => ({ ...previous, user: null }));
     } catch (failure) {
-      if (failure.status === 401) setAuth({ user: null, configured: true });
+      if (failure.status === 401) setAuth((previous) => ({ ...previous, user: null }));
       else setError(failure.message);
     } finally {
       setSigningOut(false);
@@ -193,12 +193,12 @@ export default function DispatchWorkspace({ OrderCall }) {
           : <p role="status">Connecting to Dispatch Desk…</p>}
       </main> : !auth.user ? <SignIn configured={auth.configured} notice={error} onSignIn={(user) => {
         setError('');
-        setAuth({ user, configured: true });
+        setAuth((previous) => ({ ...previous, user }));
       }} /> : <>
         <WorkspaceError>{error}</WorkspaceError>
         {signingOut ? <main className="intro" id="main"><p role="status">Signing out…</p></main>
           : orderId ? <OrderCall key={orderId} orderId={orderId} onUnauthorized={onUnauthorized} onBack={() => setOrderId('')} />
-          : <OrderList user={auth.user} onOpen={setOrderId} onUnauthorized={onUnauthorized} />}
+          : <OrderList user={auth.user} maxImportBytes={auth.maxImportBytes} onOpen={setOrderId} onUnauthorized={onUnauthorized} />}
       </>}
     </div>
   );

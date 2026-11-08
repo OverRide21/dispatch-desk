@@ -10,7 +10,7 @@ import { createDispatchHandlers } from '../src/http.mjs';
 test('an authorized import survives restart and supports bilingual confirmed edits', async (context) => {
   const dir = await mkdtemp(join(tmpdir(), 'dispatch-production-test-'));
   const file = join(dir, 'orders.sqlite');
-  let store = createStore(file);
+  let store = await createStore(file);
   context.after(async () => {
     store.close();
     await rm(dir, { recursive: true, force: true });
@@ -97,6 +97,9 @@ test('an authorized import survives restart and supports bilingual confirmed edi
   };
   await turn('ग्रीन टी बारा बॉक्स करा', 'mr-IN');
   assert.equal(call.pending.to, 12);
+  store.close();
+  store = await createStore(file);
+  app = createDispatchHandlers({ store });
   await turn('बारह नहीं, दस कर दो', 'hi-IN');
   assert.equal(call.pending.to, 10);
   assert.equal(call.order.items[0].quantity, 20);
@@ -105,7 +108,7 @@ test('an authorized import survives restart and supports bilingual confirmed edi
   assert.equal(call.history[0].actor, 'test-operator');
 
   store.close();
-  store = createStore(file);
+  store = await createStore(file);
   app = createDispatchHandlers({ store });
   const restored = await open().then(r => r.json());
   assert.equal(restored.order.items[0].quantity, 10);

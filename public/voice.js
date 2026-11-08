@@ -171,15 +171,15 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
     while (preRollMs > PRE_ROLL_MS && preRoll.length > 1) {
       preRollMs -= preRoll.shift().length * 1000 / rate;
     }
-    // Raise the floor while speaker audio is playing; microphone echo cancellation handles the rest.
-    const threshold = playback ? Math.max(0.028, noiseFloor * 4) : Math.max(0.012, noiseFloor * 3);
+    // Start only on sustained speech, with a higher threshold during playback.
+    const threshold = playback ? Math.max(0.038, noiseFloor * 4) : Math.max(0.018, noiseFloor * 3);
     if (level >= threshold) {
       onsetMs += duration;
     } else {
       onsetMs = 0;
       if (!playback) noiseFloor = noiseFloor * 0.96 + Math.min(level, 0.025) * 0.04;
     }
-    if (onsetMs < (playback ? 145 : 90)) return;
+    if (onsetMs < (playback ? 175 : 120)) return;
 
     const next = { chunks: preRoll, duration: preRollMs, silence: 0 };
     resetDetection();

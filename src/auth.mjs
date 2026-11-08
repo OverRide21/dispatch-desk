@@ -4,8 +4,6 @@ const cookieName = 'dispatch_session';
 const sessionDuration = 8 * 60 * 60 * 1000;
 const failureWindow = 60_000;
 const maxFailures = 5;
-const attemptKey = Symbol.for('dispatch-desk.login-failures');
-const failures = (globalThis[attemptKey] ??= new Map());
 const noStore = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -94,12 +92,12 @@ function sessionCookie(request, token, maxAge) {
     (expectedOrigin(request).protocol === 'https:' ? '; Secure' : '');
 }
 
-export function authenticate(request, store) {
+export async function authenticate(request, store) {
   const config = credentials();
   const token = readToken(request);
   if (!config || !token) return null;
   const sessionId = tokenHash(config, token);
-  const session = store.getAuthSession(sessionId);
+  const session = await store.getAuthSession(sessionId);
   if (!session || session.workspaceId !== config.workspaceId) return null;
   const account = config.users.find(user => user.name === session.user);
   return account ? { workspaceId: session.workspaceId, user: account.name, role: account.role, sessionId } : null;
@@ -159,9 +157,6 @@ export async function authLogin(request, store) {
     if (!config) return json({ error: 'Operator sign-in has not been configured.', code: 'auth-unconfigured' }, 503);
     const { username, password } = await loginInput(request);
     const now = Date.now();
-    for (const [key, entry] of failures) {
-      if (entry.until <= now) failures.delete(key);
-    }
     let account;
     const attemptedPassword = digest(password);
     const attemptedUsername = digest(username);
@@ -171,22 +166,21 @@ export async function authLogin(request, store) {
       if (matchesName && matchesPassword) account = user;
     }
     const knownName = config.users.find(user => user.name === username)?.name ?? 'unknown';
-    const failureKey = digest(JSON.stringify([config.workspaceId, config.sessionKey.toString('hex'), knownName])).toString('hex');
-    const previous = failures.get(failureKey);
-    if (previous?.count >= maxFailures) {
+    const failureKey = 'login:' + digest(JSON.stringify([config.workspaceId, config.sessionKey.toString('hex'), knownName])).toString('hex');
+    const previous = await store.getRate(failureKey);
+    if (previous?.count >= maxFailures || (!account && !await store.rateLimit(failureKey, maxFailures, failureWindow))) {
       return json({ error: 'Too many sign-in attempts. Try again shortly.', code: 'auth-throttled' }, 429, {
-        'Retry-After': String(Math.max(1, Math.ceil((previous.until - now) / 1000))),
+        'Retry-After': String(previous ? Math.max(1, Math.ceil((previous.until - now) / 1000)) : 60),
       });
     }
     if (!account) {
-      failures.set(failureKey, { count: (previous?.count ?? 0) + 1, until: previous?.until ?? now + failureWindow });
       return json({ error: 'The username or password is incorrect.', code: 'invalid-credentials' }, 401);
     }
-    failures.delete(failureKey);
+    if (previous) await store.clearRate(failureKey);
     const existing = readToken(request);
-    if (existing) store.deleteAuthSession(tokenHash(config, existing));
+    if (existing) await store.deleteAuthSession(tokenHash(config, existing));
     const token = randomBytes(32).toString('base64url');
-    store.createAuthSession(config.workspaceId, account.name, tokenHash(config, token), now + sessionDuration);
+    await store.createAuthSession(config.workspaceId, account.name, tokenHash(config, token), now + sessionDuration);
     return json({ user: { name: account.name, role: account.role }, workspaceId: config.workspaceId }, 200, {
       'Set-Cookie': sessionCookie(request, token, sessionDuration / 1000),
     });
@@ -195,12 +189,12 @@ export async function authLogin(request, store) {
   }
 }
 
-export function authLogout(request, store) {
+export async function authLogout(request, store) {
   try {
     assertSameOrigin(request);
     const config = credentials();
     const token = readToken(request);
-    if (config && token) store.deleteAuthSession(tokenHash(config, token));
+    if (config && token) await store.deleteAuthSession(tokenHash(config, token));
     return json({ user: null }, 200, { 'Set-Cookie': sessionCookie(request, '', 0) });
   } catch (error) {
     return authResponse(error);

@@ -25,6 +25,12 @@ function Icon({ name, size = 20 }) {
 }
 
 const wave = [9, 15, 23, 12, 29, 42, 56, 34, 19, 36, 69, 49, 26, 43, 64, 90, 60, 31, 49, 76, 100, 64, 38, 61, 82, 48, 30, 45, 66, 44, 26, 52, 33, 18, 30, 43, 27, 16, 24, 13, 8];
+const replyProviderLabels = {
+  groq: 'Groq · Qwen 27B',
+  ollama: 'Local · Qwen 4B',
+  'ollama-dhee': 'Local · Dhee 4B (8-bit)',
+  rules: 'Built-in',
+};
 
 function VoiceStage({ model, meter, desk }) {
   const canSpeak = Boolean(model.session?.voiceEnabled && model.voiceReady);
@@ -151,6 +157,18 @@ function Conversation({ model, desk }) {
         <h2 id="transcript-title">Conversation</h2>
         <span className="turn-count">{turns} {turns === 1 ? 'turn' : 'turns'}</span>
       </div>
+      {model.session && <div className="reply-settings">
+        <label htmlFor="reply-provider">Reply provider</label>
+        <select id="reply-provider" value={model.replyProvider} disabled={model.busy || model.startingMic || model.audioState === 'processing'}
+          onChange={(event) => desk.current?.setReplyProvider(event.target.value)}>
+          {Object.entries(replyProviderLabels).map(([provider, label]) => (
+            <option key={provider} value={provider} disabled={!model.session.replyProviders.includes(provider)}>
+              {label}{model.session.replyProviders.includes(provider) ? '' : ' (unavailable)'}
+            </option>
+          ))}
+        </select>
+        {model.replySource && <span>Last reply from {replyProviderLabels[model.replySource]}</span>}
+      </div>}
       <ol className="transcript" id="transcript" ref={thread} data-has-turns={turns > 0} role="log" aria-labelledby="transcript-title" aria-live="polite" aria-relevant="additions text" tabIndex={0}>
         {messages?.length ? messages.map((message, index) => {
           const caller = message.role === 'caller';
@@ -175,46 +193,73 @@ function Conversation({ model, desk }) {
         <input id="message" name="message" ref={input} value={draft} placeholder={prompts[model.language].placeholder} lang={model.language} autoComplete="off" maxLength={500}
           disabled={!model.session} required onChange={(event) => { version.current += 1; setDraft(event.target.value); }} />
         <button className="action action-send" id="send" type="submit" disabled={!accepting || !draft.trim()}>
-          Send <Icon name="send" size={18} />
+          {model.busy && model.replyProvider === 'ollama-dhee' ? 'Waiting for Dhee…' : 'Send'} <Icon name="send" size={18} />
         </button>
       </form>
     </section>
   );
 }
 
-function OrderTicket({ session }) {
+function OrderTicket({ model, desk }) {
+  const [adding, setAdding] = useState(false);
+  const session = model.session;
   const order = session?.order;
+  const items = order?.items.filter(item => item.quantity > 0 || item.status === 'shipped') ?? [];
   const pending = session?.pending;
   const history = session?.history ?? [];
   const latest = history[0];
-  const shipped = order?.items.filter((item) => item.status === 'shipped').length ?? 0;
+  const shipped = items.filter(item => item.status === 'shipped').length;
   const ticketState = pending ? 'pending' : latest ? 'saved' : 'idle';
-  const quantityUnit = order?.items.find((item) => item.id === (pending ?? latest)?.itemId)?.unit;
   const action = pending ?? latest;
+  const quantityUnit = action?.newItem?.unit ?? order?.items.find(item => item.id === action?.itemId)?.unit;
+  const accepting = Boolean(order && !model.busy && !model.startingMic && model.audioState !== 'processing');
+
+  async function addItem(event) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    const submitted = await desk.current?.proposeItem({ type: 'add', name: String(fields.get('name')).trim(),
+      quantity: Number(fields.get('quantity')), unit: String(fields.get('unit')) });
+    if (submitted) setAdding(false);
+  }
 
   return (
     <aside className="ticket" id="order-record" aria-labelledby="ticket-title" data-state={ticketState}>
       <div className="ticket-head">
         <h2 id="ticket-title"><Icon name="box" size={22} /> Order ticket</h2>
-        <span className="ticket-status">{order ? shipped === 0 ? 'Open' : shipped === order.items.length ? 'Shipped' : 'Partially shipped' : 'Loading'}</span>
+        <span className="ticket-status">{order ? shipped === 0 ? 'Open' : shipped === items.length ? 'Shipped' : 'Partially shipped' : 'Loading'}</span>
       </div>
       <div className="ticket-identity">
         <span className="ticket-id" id="order-id">{order?.id ?? '—'}</span>
         <span className="ticket-customer" id="order-customer">{order?.customer ?? 'Loading customer…'}</span>
       </div>
       <div className="order-table-wrap">
+        {order && <div className="ticket-actions">
+          <button className="action action-secondary" type="button" aria-expanded={adding} disabled={!accepting}
+            onClick={() => setAdding(value => !value)}>{adding ? 'Close add item' : 'Add item'}</button>
+        </div>}
+        {adding && <form className="add-item-form" onSubmit={addItem}>
+          <label className="add-item-name">Item name<input name="name" required maxLength={180} disabled={!accepting} /></label>
+          <label>Quantity<input name="quantity" type="number" min="1" max="1000000" step="1" required disabled={!accepting} /></label>
+          <label>Unit<select name="unit" defaultValue="pieces" disabled={!accepting}>
+            {['pieces', 'bags', 'boxes', 'kg', 'litres', 'bottles', 'packets'].map(unit => <option key={unit}>{unit}</option>)}
+          </select></label>
+          <button className="action action-primary" type="submit" disabled={!accepting}>Review addition</button>
+        </form>}
         <table className="order-table">
           <thead><tr><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Dispatch</th></tr></thead>
           <tbody id="order-items">
-            {order ? order.items.map((item) => <tr key={item.id} data-item={item.id}>
+            {items.length ? items.map((item) => <tr key={item.id} data-item={item.id}>
               <th scope="row">{item.name}</th>
               <td className={history.some((entry) => entry.itemId === item.id) ? 'updated-quantity' : undefined}>
                 {item.quantity} {item.unit}
               </td>
               <td><span className={item.status === 'shipped' ? 'row-status row-shipped' : 'row-status row-editable'}>
                 {item.status === 'shipped' && <Icon name="lock" size={15} />}{item.status === 'shipped' ? 'Shipped' : 'Editable'}
-              </span></td>
-            </tr>) : <tr><td colSpan={3}>Loading order items…</td></tr>}
+              </span>{item.status !== 'shipped' && <button className="remove-item" type="button" disabled={!accepting}
+                aria-label={`Remove ${item.name}`} onClick={() => void desk.current?.proposeItem({ type: 'remove', itemId: item.id, name: item.name })}>
+                Remove
+              </button>}</td>
+            </tr>) : <tr><td colSpan={3}>{order ? 'No items on this order.' : 'Loading order items…'}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -225,14 +270,15 @@ function OrderTicket({ session }) {
           <h3>{pending ? 'Awaiting confirmation' : latest ? 'Change saved' : 'Proposed change'}</h3>
         </div>
         {action ? <>
-          <p className="change-item">{action.name}</p>
+          <p className="change-item">{action.from === 0 ? (pending ? 'Add ' : 'Added ') : action.to === 0 ? (pending ? 'Remove ' : 'Removed ') : ''}{action.name}</p>
           <div className="change-values">
             <span><small>Before</small><strong>{action.from}</strong></span>
             <Icon name="arrow" size={24} />
             <span><small>{pending ? 'Proposed' : 'Saved'}</small><strong>{action.to}</strong></span>
             {quantityUnit && <span className="change-unit">{quantityUnit}</span>}
           </div>
-          <p className="change-note">{pending ? 'The order updates after you confirm.' : 'The updated quantity is on the order.'}</p>
+          {pending && <button className="action action-primary ticket-confirm" type="button" disabled={!accepting}
+            onClick={() => void desk.current?.submit(prompts[model.language].confirm)}>Confirm item change</button>}
         </> : <p className="change-note">Proposed edits will appear here before you confirm them.</p>}
       </div>
       <section className="ticket-history" aria-labelledby="history-title" id="change-log">
@@ -244,7 +290,7 @@ function OrderTicket({ session }) {
           {history.length ? <ol className="history-list">{history.map((entry, index) => {
             const time = new Date(entry.at);
             return <li key={`${entry.at}-${index}`}>
-              <strong>{entry.name}{entry.actor && <small className="history-actor">{entry.actor}</small>}</strong><span>{entry.from} <Icon name="arrow" size={14} /> {entry.to}</span>
+              <strong>{entry.from === 0 ? 'Added ' : entry.to === 0 ? 'Removed ' : ''}{entry.name}{entry.actor && <small className="history-actor">{entry.actor}</small>}</strong><span>{entry.from} <Icon name="arrow" size={14} /> {entry.to}</span>
               {!Number.isNaN(time.valueOf()) && <time dateTime={time.toISOString()}>
                 {time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
               </time>}
@@ -266,7 +312,7 @@ function OrderCall({ orderId, onUnauthorized, onBack }) {
         <div className="intro">
           <button className="action action-secondary back-to-orders" type="button" onClick={onBack}>← All orders</button>
           <h1>Talk through an <em>order change.</em></h1>
-          <p>Order <strong>{orderId}</strong>. Ask about the order, correct a quantity, then confirm the edit.</p>
+          <p>Order <strong>{orderId}</strong>. Add or remove items, update a quantity, and confirm each change.</p>
         </div>
         <div className="call-layout">
           <div className="call-column">
@@ -278,7 +324,7 @@ function OrderCall({ orderId, onUnauthorized, onBack }) {
             </a>}
             <Conversation model={model} desk={desk} />
           </div>
-          <OrderTicket session={model.session} />
+          <OrderTicket model={model} desk={desk} />
         </div>
       </main>
       <footer className="site-footer"><Icon name="lock" size={16} /> Shipped items are locked. Edits are applied after you confirm them.</footer>

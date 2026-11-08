@@ -123,7 +123,7 @@ export async function synthesize(text, { language, signal } = {}) {
   const locale = LANGUAGES.has(language) ? language : 'hi-IN';
   const model = process.env.GNANI_TTS_MODEL || 'timbre-v3.0';
   const v25Voices = { 'mr-IN': 'Zahira', 'hi-IN': 'Nalini', 'en-IN': 'Kaveri' };
-  const voice = process.env.GNANI_TTS_VOICE || (model === 'timbre-v2.5' ? v25Voices[locale] : 'Shivani');
+  const voice = process.env.GNANI_TTS_VOICE || (model === 'timbre-v2.5' ? v25Voices[locale] : 'Yashraj');
   const response = await providerRequest('/api/v1/tts/sse', {
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
     body: JSON.stringify({

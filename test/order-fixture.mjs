@@ -15,10 +15,10 @@ export function fixtureOrder() {
   };
 }
 
-export function fixtureStore(context) {
-  const store = createStore(':memory:');
-  const job = store.previewImport(workspaceId, actor.user, [fixtureOrder()]);
-  store.commitImport(workspaceId, actor.user, job.importId);
+export async function fixtureStore(context) {
+  const store = await createStore(':memory:');
+  const job = await store.previewImport(workspaceId, actor.user, [fixtureOrder()]);
+  await store.commitImport(workspaceId, actor.user, job.importId);
   context.after(() => store.close());
   return store;
 }
