@@ -99,15 +99,22 @@ test('wrong selectors, generated facts, transport failures, and aborted requests
   assert.deepEqual(await personalizeReply({ ...marathi, signal: caller.signal }), rules(marathi));
 });
 
-test('background warmup is shared and interactive replies stay responsive during startup', async (t) => {
+test('warmup is shared, renews loaded models without generation, and recovers from eviction', async (t) => {
   configure(t);
   const preload = Promise.withResolvers();
-  const fetch = t.mock.method(globalThis, 'fetch', async (_url, options) => {
+  let resident = true;
+  const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url.endsWith('/api/ps')) return Response.json({ models: resident ? [{ name: 'qwen3.5:4b' }] : [] });
     const payload = JSON.parse(options.body);
     assert.equal(payload.keep_alive, '10m');
+    if (!payload.messages) {
+      assert.equal(payload.model, 'qwen3.5:4b');
+      assert.equal(payload.options.num_ctx, 2048);
+      return Response.json({ done: true, done_reason: 'load' });
+    }
     assert.equal(payload.messages.length, 2);
     const { language } = JSON.parse(payload.messages[1].content);
-    return language === 'en-IN' ? preload.promise : response('{"opener":"noted"}');
+    return language === 'en-IN' ? (await preload.promise).clone() : response('{"opener":"noted"}');
   });
 
   const first = warmOllama();
@@ -120,7 +127,10 @@ test('background warmup is shared and interactive replies stay responsive during
   }
   assert.equal(await first, true);
   assert.equal(await warmOllama(), true);
-  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(fetch.mock.callCount(), 3);
+  resident = false;
+  assert.equal(await warmOllama(), true);
+  assert.equal(fetch.mock.callCount(), 5);
   assert.deepEqual(await personalizeReply(marathi), { reply: `ठीक आहे. ${marathi.reply}`, source: 'ollama' });
-  assert.equal(fetch.mock.callCount(), 2);
+  assert.equal(fetch.mock.callCount(), 6);
 });

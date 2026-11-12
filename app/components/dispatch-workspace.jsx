@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Catalog from './catalog.jsx';
 import OrderImport from './order-import.jsx';
+import VoiceUsage from './voice-usage.jsx';
 import { jsonRequest, workspaceRequest } from './workspace-api.js';
 
 function WorkspaceMark() {
@@ -57,12 +59,13 @@ function SignIn({ configured, onSignIn, notice }) {
   );
 }
 
-function OrderList({ user, maxImportBytes, onOpen, onUnauthorized }) {
+function OrderList({ user, maxImportBytes, shopEnabled, onOpen, onUnauthorized }) {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState({ query: '', revision: 0 });
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
   const [importNotice, setImportNotice] = useState('');
   const canImport = user.role === 'admin';
 
@@ -96,9 +99,21 @@ function OrderList({ user, maxImportBytes, onOpen, onUnauthorized }) {
           <h1>Find an <em>order.</em></h1>
           <p>Open an order to talk through changes in Marathi, Hindi, or English.</p>
         </div>
-        {canImport && <button className="action action-primary" type="button" aria-expanded={showImport}
-          onClick={() => setShowImport((visible) => !visible)}>{showImport ? 'Close import' : 'Import orders'}</button>}
+        <div className="order-tools">
+          {shopEnabled && <a className="action action-secondary" href="/shop">Open storefront</a>}
+          {canImport && <>
+            <button className="action action-secondary" type="button" aria-expanded={showCatalog}
+              onClick={() => { setShowCatalog(visible => !visible); setShowImport(false); }}>
+              {showCatalog ? 'Close catalog' : 'Catalog and stock'}
+            </button>
+            <button className="action action-primary" type="button" aria-expanded={showImport}
+              onClick={() => { setShowImport(visible => !visible); setShowCatalog(false); }}>
+              {showImport ? 'Close import' : 'Import orders'}
+            </button>
+          </>}
+        </div>
       </div>
+      {showCatalog && canImport && <Catalog onUnauthorized={onUnauthorized} />}
       {showImport && canImport && <OrderImport maxFileBytes={maxImportBytes} onUnauthorized={onUnauthorized} onComplete={({ counts }) => {
         setShowImport(false);
         setImportNotice(`Import complete. ${counts.created} created, ${counts.updated} updated, ${counts.unchanged} unchanged.`);
@@ -106,6 +121,7 @@ function OrderList({ user, maxImportBytes, onOpen, onUnauthorized }) {
         loadOrders('');
       }} />}
       {importNotice && <p className="workspace-notice" role="status">{importNotice}</p>}
+      <VoiceUsage canEdit={canImport} onUnauthorized={onUnauthorized} />
       <section className="workspace-panel order-list" aria-labelledby="orders-title">
         <div className="order-list-head">
           <h2 id="orders-title">Orders</h2>
@@ -122,13 +138,13 @@ function OrderList({ user, maxImportBytes, onOpen, onUnauthorized }) {
           : results.length === 0 ? <div className="orders-empty">
             <h3>{search.query ? 'No matching orders' : 'No orders yet'}</h3>
             <p>{search.query ? 'Check the order reference and search again.' : canImport
-              ? 'Import an order file to make it available for calls.' : 'Ask your workspace administrator to import orders.'}</p>
+              ? 'Import an order file or place an order in the storefront.' : 'Ask your workspace administrator to add an order.'}</p>
             {search.query && <button type="button" className="action action-secondary" onClick={() => { setInput(''); loadOrders(''); }}>Show all orders</button>}
           </div> : <ul className="order-results">
             {results.map((order) => (
               <li key={order.id}>
                 <button type="button" className="order-result" onClick={() => onOpen(order.id)} aria-label={`Open order ${order.id}`}>
-                  <span><strong>{order.id}</strong><span>{order.customer}</span></span>
+                  <span><strong>{order.id}</strong><span>{order.customer}{order.source === 'storefront' ? ' · Storefront' : ''}</span></span>
                   <span>{order.itemCount} {order.itemCount === 1 ? 'item' : 'items'} <span aria-hidden="true">→</span></span>
                 </button>
               </li>
@@ -145,10 +161,23 @@ export default function DispatchWorkspace({ OrderCall }) {
   const [authAttempt, setAuthAttempt] = useState(0);
   const [signingOut, setSigningOut] = useState(false);
   const [orderId, setOrderId] = useState('');
-  const onUnauthorized = useCallback(() => {
+  const backToOrders = useCallback(() => {
     setOrderId('');
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('orderId')) {
+      url.searchParams.delete('orderId');
+      window.history.replaceState(window.history.state, '', url);
+    }
+  }, []);
+  const onUnauthorized = useCallback(() => {
+    backToOrders();
     setAuth((previous) => ({ ...previous, user: null }));
     setError('Your sign-in expired. Sign in to continue.');
+  }, [backToOrders]);
+
+  useEffect(() => {
+    const reference = new URLSearchParams(window.location.search).get('orderId')?.trim();
+    if (reference && reference.length <= 120) setOrderId(reference);
   }, []);
 
   useEffect(() => {
@@ -163,7 +192,7 @@ export default function DispatchWorkspace({ OrderCall }) {
     if (signingOut) return;
     setSigningOut(true);
     setError('');
-    setOrderId('');
+    backToOrders();
     try {
       await workspaceRequest('/api/auth', { method: 'DELETE' });
       setAuth((previous) => ({ ...previous, user: null }));
@@ -179,12 +208,12 @@ export default function DispatchWorkspace({ OrderCall }) {
     <div className="dispatch">
       <a className="skip-link" href="#main">Skip to main content</a>
       <header className="site-header">
-        <a className="wordmark" href="#main" onClick={() => setOrderId('')}><span><WorkspaceMark /></span>Dispatch Desk</a>
+        <a className="wordmark" href="#main" onClick={backToOrders}><span><WorkspaceMark /></span>Dispatch Desk</a>
         {auth?.user && <div className="header-actions">
           <span className="account-name">{auth.user.name}</span>
-          <button className="action action-secondary" type="button" disabled={signingOut} onClick={signOut}>
+          {!auth.localAccess && <button className="action action-secondary" type="button" disabled={signingOut} onClick={signOut}>
             {signingOut ? 'Signing out…' : 'Sign out'}
-          </button>
+          </button>}
         </div>}
       </header>
       {!auth ? <main className="intro" id="main">
@@ -197,8 +226,9 @@ export default function DispatchWorkspace({ OrderCall }) {
       }} /> : <>
         <WorkspaceError>{error}</WorkspaceError>
         {signingOut ? <main className="intro" id="main"><p role="status">Signing out…</p></main>
-          : orderId ? <OrderCall key={orderId} orderId={orderId} onUnauthorized={onUnauthorized} onBack={() => setOrderId('')} />
-          : <OrderList user={auth.user} maxImportBytes={auth.maxImportBytes} onOpen={setOrderId} onUnauthorized={onUnauthorized} />}
+          : orderId ? <OrderCall key={orderId} orderId={orderId} onUnauthorized={onUnauthorized} onBack={backToOrders} />
+          : <OrderList user={auth.user} maxImportBytes={auth.maxImportBytes} shopEnabled={auth.shopEnabled}
+            onOpen={setOrderId} onUnauthorized={onUnauthorized} />}
       </>}
     </div>
   );

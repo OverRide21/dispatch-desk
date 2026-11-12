@@ -1,10 +1,14 @@
-import { createSession, handleTurn, snapshot } from './orders.mjs';
+import { createSession, handleTurn, routeOrderLookup, shouldInterpretTurn, snapshot } from './orders.mjs';
+import { interpretOrderTurn } from './order-interpretation.mjs';
 import { synthesize, transcribe, voiceAvailable } from './gnani.mjs';
 import { ollamaEnabled, personalizeReply, warmOllama } from './ollama.mjs';
 import { groqEnabled, selectGroqReply } from './groq.mjs';
-import { authenticate, authConfigured, authLogin, authLogout, assertSameOrigin } from './auth.mjs';
+import { sarvamEnabled } from './sarvam.mjs';
+import { authenticate, authConfigured, authLogin, authLogout, assertSameOrigin, localAccessEnabled } from './auth.mjs';
 import { getStore } from './store.mjs';
 import { inspectOrderImport, parseOrderImport, orderTemplate } from './order-import.mjs';
+import { renderOrderReceipt } from './order-receipt.mjs';
+import { wavDurationMilliseconds } from './voice-usage.mjs';
 
 const locales = new Set(['mr-IN', 'hi-IN', 'en-IN']);
 const uploadLimit = (process.env.VERCEL ? 4 : 5) * 1024 * 1024;
@@ -71,10 +75,10 @@ async function readJson(request) {
 
 }
 
-function readText(body) {
+function readText(body, limit = 500) {
   const text = typeof body?.text === 'string' ? body.text.trim() : '';
-  if (!text || text.length > 500) {
-    throw new RequestError(400, 'Enter a message between 1 and 500 characters.');
+  if (!text || text.length > limit) {
+    throw new RequestError(400, `Enter a message between 1 and ${limit} characters.`);
   }
   if (body.language !== undefined && !locales.has(body.language)) {
     throw new RequestError(400, 'Choose Hindi, Marathi, or English.');
@@ -83,15 +87,17 @@ function readText(body) {
 }
 
 function replyProviders() {
+  const groq = groqEnabled();
   return [
-    ...(groqEnabled() ? ['groq'] : []),
-    ...['ollama', 'ollama-dhee'].filter(ollamaEnabled),
     'rules',
+    ...(sarvamEnabled() || groq ? ['auto'] : []),
+    ...(groq ? ['groq'] : []),
+    ...['ollama', 'ollama-hari'].filter(ollamaEnabled),
   ];
 }
 
 async function styleOrderReply({ provider, ...input }) {
-  if (provider === 'ollama' || provider === 'ollama-dhee') return personalizeReply({ provider, ...input });
+  if (provider === 'ollama' || provider === 'ollama-hari') return personalizeReply({ provider, ...input });
   if (provider === 'groq') {
     const reply = await selectGroqReply(input);
     if (reply) return { reply, source: 'groq' };
@@ -100,13 +106,15 @@ async function styleOrderReply({ provider, ...input }) {
 }
 
 function sessionData(session) {
+  const providers = replyProviders();
   return {
     sessionId: session.id,
     revision: session.revision,
     voiceEnabled: voiceAvailable(),
     voiceAutoLanguage: process.env.GNANI_STT_MODEL !== 'prisma-v2.5',
     ollamaEnabled: ollamaEnabled(),
-    replyProviders: replyProviders(),
+    replyProviders: providers,
+    defaultReplyProvider: providers.includes('auto') ? 'auto' : 'rules',
     ...snapshot(session.state),
   };
 }
@@ -130,7 +138,7 @@ function requestError(error) {
   return json({ error: 'Something went wrong. Please try again.' }, 500);
 }
 
-async function voiceRoute(request, action, session) {
+async function voiceRoute(request, action, { db, actor, session }) {
   if (!voiceAvailable()) {
     discardBody(request);
     throw new RequestError(503, 'Live voice needs a Gnani API key. You can still type to the desk.');
@@ -146,18 +154,19 @@ async function voiceRoute(request, action, session) {
         throw new RequestError(400, 'Choose Hindi, Marathi, or English.');
       }
       const input = await readBody(request, 1_048_576);
-      if (input.length < 44 || input.toString('ascii', 0, 4) !== 'RIFF' ||
-          input.toString('ascii', 8, 12) !== 'WAVE') {
-        throw new RequestError(400, 'Send a valid WAV recording.');
-      }
-      return json(await transcribe(input, { language, signal }));
+      const transcriptionMilliseconds = wavDurationMilliseconds(input);
+      signal.throwIfAborted();
+      await db.voiceUsage.reserve(actor.workspaceId, session.id, { transcriptionMilliseconds });
+      return await transcribe(input, { language, signal });
     }
 
-    const { text, language } = readText(await readJson(request));
+    const { text, language } = readText(await readJson(request), 1_500);
     const reply = session.state.messages.at(-1);
     if (reply?.role !== 'agent' || reply.text !== text || reply.language !== language) {
       throw new RequestError(409, 'Only the current desk reply can be played.');
     }
+    signal.throwIfAborted();
+    await db.voiceUsage.reserve(actor.workspaceId, session.id, { synthesisCharacters: [...text].length });
     const audio = await synthesize(text, { language, signal });
     const headers = { ...responseHeaders, 'Content-Type': audio.contentType };
     if (audio.sampleRate) headers['X-Sample-Rate'] = audio.sampleRate;
@@ -190,7 +199,7 @@ async function voiceRoute(request, action, session) {
       },
     }), { headers });
   } catch (error) {
-    if (error instanceof RequestError) throw error;
+    if (error instanceof RequestError || ['voice-budget-exhausted', 'voice-invalid-wav'].includes(error?.code)) throw error;
     if (request.signal.aborted) {
       throw new RequestError(408, 'The voice request was cancelled.');
     }
@@ -210,6 +219,10 @@ function publicUser(actor) {
   return actor ? { name: actor.user, role: actor.role } : null;
 }
 
+function shopEnabled() {
+  return process.env.DISPATCH_STOREFRONT_ENABLED === '1';
+}
+
 async function requireOrder(store, workspaceId, id) {
   const order = await store.getOrder(workspaceId, id);
   if (!order) throw new RequestError(404, 'Order not found.');
@@ -219,7 +232,7 @@ async function requireOrder(store, workspaceId, id) {
 function refreshOrder(session, order) {
   if (session.state.order.revision === order.revision) return;
   const { history, ...record } = order;
-  Object.assign(session.state, { order: record, history, pending: null, focus: null });
+  Object.assign(session.state, { order: record, history, pending: null, stockOffer: null, focus: null });
   session.revision++;
 }
 
@@ -236,7 +249,7 @@ function encodedHeader(request, key, limit) {
 
 export function createDispatchHandlers({
   store = null, identify = authenticate,
-  styleReply = styleOrderReply, warmReplyModel = () => {},
+  styleReply = styleOrderReply, warmReplyModel = warmOllama, interpret = interpretOrderTurn,
 } = {}) {
   const database = () => store ?? getStore();
   const protectedRoute = (action, { sessionRequired = false, lock = false, admin = false, operation } = {}) => async (request) => {
@@ -273,14 +286,21 @@ export function createDispatchHandlers({
     if (!await db.rateLimit('voice:' + actor.sessionId, 40, 60_000)) {
       throw new RequestError(429, 'Voice request limit reached. Wait a moment or continue by text.');
     }
-    return voiceRoute(request, action, session);
+    const result = await voiceRoute(request, action, { db, actor, session });
+    return action === 'transcribe' ? json(result) : result;
   }, { sessionRequired: true, operation: `voice.${action}` });
+  const manageCatalog = action => protectedRoute(async (request, context) => {
+    if (context.actor.role !== 'admin') throw new RequestError(403, 'Only administrators can manage stock.');
+    return action(request, context);
+  }, { operation: 'catalog.manage' });
 
   return {
     async auth(request) {
       try {
-        const configured = authConfigured();
-        return json({ configured, user: configured ? publicUser(await identify(request, await database())) : null, maxImportBytes: uploadLimit });
+        const localAccess = localAccessEnabled(request);
+        const configured = localAccess || authConfigured();
+        return json({ configured, user: configured ? publicUser(await identify(request, await database())) : null,
+          maxImportBytes: uploadLimit, shopEnabled: shopEnabled(), localAccess });
       } catch (error) {
         return requestError(error);
       }
@@ -308,6 +328,67 @@ export function createDispatchHandlers({
       const query = new URL(request.url).searchParams.get('q')?.trim().slice(0, 120);
       return json({ orders: await db.listOrders(actor.workspaceId, { query, limit: 100 }) });
     }),
+    catalog: manageCatalog(async (_request, { db, actor }) => {
+      return json({ products: await db.listProducts(actor.workspaceId) });
+    }),
+    saveProduct: manageCatalog(async (request, { db, actor }) => {
+      return json({ product: await db.saveProduct(actor.workspaceId, await readJson(request)) });
+    }),
+    addStock: manageCatalog(async (request, { db, actor }) => {
+      const body = await readJson(request);
+      return json({ product: await db.addStock(actor.workspaceId, body?.sku, body?.quantity, body?.requestId) });
+    }),
+    async shop(request) {
+      try {
+        if (!shopEnabled()) throw new RequestError(404, 'The storefront is currently closed.', 'shop-disabled');
+        const workspaceId = process.env.DISPATCH_WORKSPACE_ID?.trim() || 'default';
+        if (request.method === 'GET') {
+          const products = await (await database()).listProducts(workspaceId);
+          return json({ products: products.map(({ sku, name, nameHi, nameMr, unit, category, pricePaise, stock }) =>
+            ({ sku, name, nameHi, nameMr, unit, category, pricePaise, stock })) });
+        }
+        assertSameOrigin(request);
+        const input = await readJson(request);
+        const db = await database();
+        if (!await db.rateLimit('shop:' + workspaceId, 30, 60_000)) {
+          throw new RequestError(429, 'The storefront is busy. Wait a minute and try again.', 'shop-busy');
+        }
+        return json(await db.placeShopOrder(workspaceId, input), 201);
+      } catch (error) {
+        discardBody(request);
+        return requestError(error);
+      }
+    },
+    receipts: protectedRoute(async (request, { db, actor }) => {
+      const params = new URL(request.url).searchParams;
+      const orderId = params.get('orderId');
+      if (!orderId || orderId.length > 120) throw new RequestError(400, 'Choose an order first.');
+      await requireOrder(db, actor.workspaceId, orderId);
+      const receiptId = params.get('receiptId');
+      if (receiptId === null) return json({ receipts: await db.getOrderReceipts(actor.workspaceId, orderId) });
+      if (!receiptId || receiptId.length > 100) throw new RequestError(404, 'Receipt not found.');
+      const [receipt] = await db.getOrderReceipts(actor.workspaceId, orderId, { id: receiptId });
+      if (!receipt) throw new RequestError(404, 'Receipt not found.');
+      const language = params.get('language') ?? undefined;
+      if (language && !locales.has(language)) throw new RequestError(400, 'Choose a receipt language.');
+      return new Response(renderOrderReceipt(receipt, language), { headers: {
+        ...responseHeaders,
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+      } });
+    }),
+    voiceUsage: protectedRoute(async (request, { db, actor }) => {
+      const sessionId = request.headers.get('x-session-id');
+      if (sessionId && !await db.getCall(sessionId, actor)) {
+        throw new RequestError(404, 'Voice usage for this call could not be found.');
+      }
+      return json(await db.voiceUsage.summary(actor.workspaceId, sessionId));
+    }),
+    saveVoiceUsage: protectedRoute(async (request, { db, actor }) => {
+      if (actor.role !== 'admin') throw new RequestError(403, 'Only administrators can edit voice budgets.');
+      await db.voiceUsage.setLimits(actor.workspaceId, await readJson(request));
+      return json(await db.voiceUsage.summary(actor.workspaceId));
+    }),
     session: protectedRoute(async (request, { db, actor }) => {
       const params = new URL(request.url).searchParams;
       const orderId = params.get('orderId');
@@ -318,20 +399,66 @@ export function createDispatchHandlers({
       let session = await db.getCall(request.headers.get('x-session-id'), actor);
       if (!session || session.state.order.id !== order.id || session.state.order.revision !== order.revision) {
         session = await db.createCall(actor, createSession(order, language));
+      } else if (order.source === 'storefront') {
+        const { history, ...record } = order;
+        session.state.order = record;
       }
-      void warmReplyModel();
       return json(sessionData(session));
     }),
+    warmModel: protectedRoute(async (request, { db, actor }) => {
+      const { provider } = await readJson(request) ?? {};
+      if (!['ollama', 'ollama-hari'].includes(provider) || !ollamaEnabled(provider)) {
+        throw new RequestError(400, 'Choose an available local reply model.');
+      }
+      if (!await db.rateLimit('model-warmup:' + actor.sessionId, 30, 60_000)) {
+        throw new RequestError(429, 'Too many model checks. Wait a moment and retry.');
+      }
+      const ready = await warmReplyModel(provider);
+      if (!ready) throw new RequestError(503, 'Could not warm up this model. Check Ollama, then retry.', 'model-unavailable');
+      return json({ provider, ready });
+    }, { operation: 'model.warmup' }),
+    shipping: protectedRoute(async (request, { db, actor, session }) => {
+      const { id, source } = session.state.order;
+      if (source !== 'storefront') return json({ holdUntil: null });
+      if (request.method !== 'GET') await db.setShippingHold(session, request.method === 'POST');
+      const [order, holdUntil] = await Promise.all([
+        requireOrder(db, actor.workspaceId, id),
+        db.shippingHoldUntil(actor.workspaceId, id),
+      ]);
+      const revision = new URL(request.url).searchParams.get('revision');
+      return json({ holdUntil, ...(String(order.revision) !== revision ? { order } : {}) });
+    }, { sessionRequired: true, operation: 'order.shipping' }),
     turn: protectedRoute(async (request, { db, actor, session }) => {
       assertRevision(session, request);
-      const body = await readJson(request);
+      const audio = request.headers.get('content-type')?.split(';')[0].trim() === 'audio/wav';
+      const providers = replyProviders();
+      const audioProvider = audio ? request.headers.get('x-reply-provider') ?? 'rules' : null;
+      if (audio && (!['rules', 'auto'].includes(audioProvider) || !providers.includes(audioProvider))) {
+        discardBody(request);
+        throw new RequestError(400, 'Choose an available voice provider.');
+      }
+      if (audio && !await db.rateLimit('voice:' + actor.sessionId, 40, 60_000)) {
+        throw new RequestError(429, 'Voice request limit reached. Wait a moment or continue by text.');
+      }
+      const body = audio
+        ? { ...await voiceRoute(request, 'transcribe', { db, actor, session }), replyProvider: audioProvider }
+        : await readJson(request);
+      if (audio && !body.text) throw new RequestError(422, 'I could not catch that. Try speaking a little closer to the microphone.');
       const input = readText(body);
       if (body.itemAction !== undefined && !['add', 'remove'].includes(body.itemAction?.type)) {
         throw new RequestError(400, 'Choose an item action.');
       }
-      const providers = replyProviders();
+      if (body.stockAction !== undefined && (body.itemAction !== undefined ||
+          !['partial', 'backorder', 'substitute'].includes(body.stockAction?.type))) {
+        throw new RequestError(400, 'Choose a stock option.');
+      }
       const provider = body.replyProvider ?? providers[0];
       if (!providers.includes(provider)) throw new RequestError(400, 'Choose an available reply provider.');
+      const interpretationMode = body.interpretationMode ?? 'parser';
+      const automatic = provider === 'auto';
+      if (!['parser', 'llm'].includes(interpretationMode) || (interpretationMode === 'llm' && provider === 'rules')) {
+        throw new RequestError(400, 'Choose an available model for LLM interpretation.');
+      }
       if (request.signal.aborted) throw new RequestError(408, 'The message was cancelled.');
       const order = await requireOrder(db, actor.workspaceId, session.state.order.id);
       if (session.state.order.revision !== order.revision) {
@@ -342,9 +469,35 @@ export function createDispatchHandlers({
       }
       const previousReply = session.state.messages.at(-1)?.text;
       const candidate = structuredClone(session.state);
-      const { choices, change, rejectedChange, ...result } = handleTurn(candidate, { ...input, itemAction: body.itemAction });
-      const requireDhee = provider === 'ollama-dhee';
-      const variants = requireDhee && choices
+      if (order.source === 'storefront') {
+        const { history, ...record } = order;
+        candidate.order = record;
+      }
+      const turnInput = { ...input, itemAction: body.itemAction, stockAction: body.stockAction };
+      const usesModels = automatic || interpretationMode === 'llm';
+      const shouldInterpret = usesModels && shouldInterpretTurn(candidate, turnInput);
+      let interpretation = automatic && shouldInterpret ? routeOrderLookup(candidate.order, input.text) : null;
+      let interpretationSource = interpretation ? 'order-data' : usesModels ? 'controls' : 'parser';
+      if (shouldInterpret && !interpretation) {
+        if (!await db.rateLimit('model-interpretation:' + actor.sessionId, 40, 60_000)) {
+          throw new RequestError(429, 'Too many model requests. Wait a moment or switch to the built-in parser.');
+        }
+        const modelInput = { text: input.text, session: candidate, signal: request.signal };
+        interpretationSource = automatic ? (sarvamEnabled() ? 'sarvam' : 'groq') : provider;
+        interpretation = await interpret({ ...modelInput, provider: interpretationSource });
+        if (interpretationSource === 'sarvam' && !interpretation && !request.signal.aborted && groqEnabled()) {
+          interpretationSource = 'groq';
+          interpretation = await interpret({ ...modelInput, provider: 'groq' });
+        }
+        if (request.signal.aborted) throw new RequestError(408, 'The message was cancelled.');
+        if (!interpretation) {
+          throw new RequestError(503, 'The model could not interpret this request. Try again or switch to the built-in parser.', 'interpretation-unavailable');
+        }
+      }
+      const { choices, change, rejectedChange, ...result } = handleTurn(candidate, { ...turnInput, interpretation });
+      const styleEnabled = !automatic && interpretationMode === 'parser' && provider !== 'rules';
+      const requireHari = styleEnabled && provider === 'ollama-hari';
+      const variants = requireHari && choices
         ? choices.options.map(option => [choices.prefix, option.replace('{amount}', () => choices.amount)].filter(Boolean).join(' '))
         : [];
       async function styleTurn() {
@@ -370,22 +523,27 @@ export function createDispatchHandlers({
         }
         return null;
       }
-      const dheeReply = requireDhee ? await styleTurn() : null;
-      if (requireDhee && !dheeReply) {
+      const hariReply = requireHari ? await styleTurn() : null;
+      if (requireHari && !hariReply) {
         if (request.signal.aborted) throw new RequestError(408, 'The message was cancelled.');
-        throw new RequestError(503, 'Dhee could not finish the reply. Check that Ollama is running, then retry.', 'dhee-unavailable');
+        throw new RequestError(503, 'Hari could not finish the reply. Check that Ollama is running, then retry.', 'hari-unavailable');
       }
+      let receipt;
       if (change) {
         const saved = await db.saveQuantity(actor.workspaceId, order.id, {
           itemId: change.itemId, quantity: change.to, newItem: change.newItem, revision: order.revision, actor: actor.user,
+          backorderQuantity: change.backorderQuantity, updates: change.updates,
+          receipt: { language: result.language, blockedRequests: candidate.blockedRequests ?? [] },
         });
-        const { history, ...record } = saved;
+        const { history, receipt: savedReceipt, ...record } = saved;
+        receipt = savedReceipt;
         candidate.order = record;
         candidate.history = history;
+        candidate.blockedRequests = [];
       }
       session.state = candidate;
       session.revision++;
-      const styled = requireDhee ? dheeReply : await styleTurn();
+      const styled = !styleEnabled ? null : requireHari ? hariReply : await styleTurn();
       const reply = styled?.reply ?? result.reply;
       session.state.messages.at(-1).text = reply;
       await db.saveCall(session);
@@ -395,6 +553,8 @@ export function createDispatchHandlers({
         ...result,
         reply,
         replySource: styled?.source ?? 'rules',
+        interpretationSource,
+        ...(receipt ? { receipt } : {}),
       });
     }, { sessionRequired: true, lock: true, operation: 'order.turn' }),
     transcribe: speechRoute('transcribe'),
@@ -441,4 +601,4 @@ export function createDispatchHandlers({
   };
 }
 
-export const dispatchHandlers = createDispatchHandlers({ warmReplyModel: warmOllama });
+export const dispatchHandlers = createDispatchHandlers();

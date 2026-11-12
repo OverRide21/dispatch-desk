@@ -81,3 +81,19 @@ The production workflow starts with an empty order list. An administrator import
 - [x] Verify the full production workflow with an empty database. Automated checks cover all three formats, invalid rows, repeated imports, stale revisions, shipped lines, and unauthorized access. Chrome verified sign-in, empty state, CSV preview and commit, order lookup, a Marathi request and Hindi correction, and the saved result after a server restart. Checked desktop and mobile layouts. A second Chrome run imported JSON and exercised microphone capture, bilingual playback and interruption, and confirmation using simulated audio and a local speech provider mock.
 
 The rollout targets one long-lived Node process with SQLite on a persistent volume and one configured workspace per deployment. Hosting, HTTPS, backup scheduling, and log alerts are configured on the deployment host.
+
+### 10. Stock, fulfillment, receipts, and voice budgets
+
+| Workstream | Completion check |
+| --- | --- |
+| Order decisions | Offer available stock, authorized backorders, and approved substitutes in the call language. Each option requires explicit confirmation. Packed, shipped, and cutoff locks are checked before proposing and again before saving. |
+| Import and storage | Import optional stock and shipment metadata in all three formats, preserve existing orders, save substitute changes atomically, and store a receipt with each confirmed change. |
+| Voice budgets | Meter submitted audio duration and playback characters, reserve daily capacity atomically, and give administrators a budget control. |
+| Integration and verification | Connect stock options, milestones, receipt history, and voice usage to the existing workspace. Verify imports, confirmations, printing, and quota failures with isolated test data. |
+
+### 11. Connect the storefront and dispatch desk
+
+- Catalog and inventory persist product details, additive restocks, and available stock. Checkout and confirmed edits reserve or release stock in the same database transaction as the order.
+- The buyer storefront shows available products, accepts a cart, and returns an order reference that opens the signed-in call workspace.
+- Administrators manage products and add stock in the existing workspace. Imported orders continue to use their line-level inventory data.
+- Verification covers permissions, checkout retry, concurrent stock claims, an open call reacting to a later sale, and a substitute update reflected in the storefront.

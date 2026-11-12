@@ -134,6 +134,54 @@ test('templates download as real CSV, Excel and versioned JSON', async () => {
     } else {
       assert.equal(info.mapping.quantity, 'Quantity');
       assert.equal(info.mapping.nameMr, 'Item name (Marathi)');
+      assert.equal(info.mapping.availableQuantity, 'Available quantity');
+      assert.equal(info.mapping.editCutoffAt, 'Edit cutoff at');
     }
   }
+});
+
+test('stock and fulfillment metadata normalize in CSV, JSON and Excel', async () => {
+  const columns = [
+    'Order ID', 'Customer', 'Line ID', 'SKU', 'Unit', 'Quantity', 'Fulfillment status',
+    'Available quantity', 'Backorder allowed', 'Substitute SKU', 'Backorder quantity',
+    'Fulfillment stage', 'Picked at', 'Packed at', 'Delivery ETA', 'Edit cutoff at',
+  ];
+  const cells = [
+    'O-1', 'Warehouse', 'L-1', '0001', 'boxes', 9, 'pending', 7, 'yes', '0002', 2,
+    'packed', '2026-11-10T10:00:00+05:30', '2026-11-10T11:00:00+05:30', '2026-11-11', '2026-11-10T09:00:00+05:30',
+  ];
+  const csv = { filename: 'orders.csv', bytes: Buffer.from(columns.join(',') + '\n' + cells.join(',')) };
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Orders');
+  sheet.addRow(columns);
+  const excelCells = cells.map((value, index) => index >= 12 ? new Date(value) : value);
+  sheet.addRow(excelCells);
+  const excel = { filename: 'orders.xlsx', bytes: Buffer.from(await workbook.xlsx.writeBuffer()) };
+  const json = {
+    filename: 'orders.json',
+    bytes: Buffer.from(JSON.stringify({ version: 1, orders: [{ id: 'O-1', customer: 'Warehouse', items: [{
+      id: 'L-1', sku: '0001', unit: 'boxes', quantity: 9, status: 'pending', availableQuantity: 7,
+      backorderAllowed: true, substituteSku: '0002', backorderQuantity: 2, fulfillmentStage: 'packed',
+      pickedAt: cells[12], packedAt: cells[13], deliveryEta: cells[14], editCutoffAt: cells[15],
+    }] }] })),
+  };
+  for (const source of [csv, json, excel]) {
+    const parsed = await parseOrderImport(source);
+    assert.deepEqual(parsed.errors, [], source.filename);
+    assert.deepEqual(parsed.orders[0].items[0], {
+      id: 'L-1', sku: '0001', name: '0001', unit: 'boxes', quantity: 9, status: 'pending', aliases: [],
+      availableQuantity: 7, backorderAllowed: true, substituteSku: '0002', backorderQuantity: 2, fulfillmentStage: 'packed',
+      pickedAt: '2026-11-10T04:30:00.000Z', packedAt: '2026-11-10T05:30:00.000Z',
+      deliveryEta: '2026-11-11T00:00:00.000Z', editCutoffAt: '2026-11-10T03:30:00.000Z',
+    });
+  }
+
+  const invalid = cells.slice();
+  invalid[10] = 10;
+  invalid[13] = '2026-11-10T08:00:00Z';
+  invalid[12] = '2026-11-10T09:00:00Z';
+  invalid[15] = '2026-11-10T09:00:00';
+  const rejected = await parseOrderImport({ ...csv, bytes: Buffer.from(columns.join(',') + '\n' + invalid.join(',')) });
+  assert.deepEqual(rejected.orders, []);
+  assert.deepEqual(new Set(rejected.errors.map(error => error.field)), new Set(['backorderQuantity', 'packedAt', 'editCutoffAt']));
 });

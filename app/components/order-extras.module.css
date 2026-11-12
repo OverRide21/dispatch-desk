@@ -1,0 +1,53 @@
+.section, .stock {
+  margin: .8rem clamp(.8rem, 2vw, 1.35rem);
+  border-top: 1px solid var(--line);
+  padding-top: .7rem;
+}
+
+.section summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: .93rem;
+  font-weight: 700;
+}
+
+.lines {
+  list-style: none;
+  padding: 0;
+  margin: .4rem 0 0;
+  font-size: .93rem;
+  overflow-wrap: anywhere;
+}
+
+.lines li { padding: .48rem 0; }
+.lines li + li { border-top: 1px solid var(--line); }
+.lineHead { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .22rem .75rem; }
+.lineHead span, .note { color: var(--muted); }
+.note { margin: .45rem 0; font-size: .93rem; }
+.milestones { margin: .35rem 0 0; }
+.milestones div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .1rem .6rem; }
+.milestones dt { color: var(--muted); }
+.milestones dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.stock h3 { margin: 0; font-size: .93rem; }
+.stock p { margin: .28rem 0 .58rem; font-size: .93rem; }
+.options { display: flex; flex-wrap: wrap; gap: .45rem; }
+.options button { min-height: 44px; text-align: start; }
+.newReceipt { display: inline-flex; align-items: center; min-height: 44px; margin-block-end: .4rem; font-weight: 700; }
+.receiptLanguage { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .65rem; margin-top: .55rem; font-size: .93rem; }
+.receiptLanguage select {
+  min-height: 44px;
+  max-width: 100%;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  padding: .35rem .55rem;
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+}
+
+.section a { color: var(--red); text-underline-offset: .2em; }
+.section a:focus-visible, .section summary:focus-visible, .receiptLanguage select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}

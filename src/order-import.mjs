@@ -2,6 +2,7 @@ import { extname } from 'node:path';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import yauzl from 'yauzl';
+import { normalizeOrderDetails, orderDetailFields } from './order-details.mjs';
 
 export const maxOrderImportBytes = 5 * 1024 * 1024;
 const maxRecords = 5_000;
@@ -25,6 +26,16 @@ const fields = {
   aliases: { title: 'Aliases', headers: ['aliases', 'itemAliases', 'productAliases'] },
   nameHi: { title: 'Item name (Hindi)', headers: ['nameHi', 'itemNameHindi', 'hindiName', 'nameHindi'] },
   nameMr: { title: 'Item name (Marathi)', headers: ['nameMr', 'itemNameMarathi', 'marathiName', 'nameMarathi'] },
+  availableQuantity: { title: 'Available quantity', headers: ['availableQuantity', 'availableStock', 'stockAvailable'] },
+  backorderAllowed: { title: 'Backorder allowed', headers: ['backorderAllowed', 'allowBackorder'] },
+  substituteSku: { title: 'Substitute SKU', headers: ['substituteSku', 'alternateSku', 'replacementSku'] },
+  backorderQuantity: { title: 'Backorder quantity', headers: ['backorderQuantity', 'backorderedQuantity'] },
+  fulfillmentStage: { title: 'Fulfillment stage', headers: ['fulfillmentStage', 'fulfilmentStage', 'shipmentStage'] },
+  pickedAt: { title: 'Picked at', headers: ['pickedAt', 'pickedDate'] },
+  packedAt: { title: 'Packed at', headers: ['packedAt', 'packedDate'] },
+  shippedAt: { title: 'Shipped at', headers: ['shippedAt', 'shippedDate', 'dispatchedAt'] },
+  deliveryEta: { title: 'Delivery ETA', headers: ['deliveryEta', 'estimatedDelivery', 'deliveryEstimate'] },
+  editCutoffAt: { title: 'Edit cutoff at', headers: ['editCutoffAt', 'editCutoff', 'changeCutoffAt'] },
 };
 const required = ['orderId', 'customer', 'lineId', 'quantity', 'unit', 'status'];
 const statuses = new Map([
@@ -413,7 +424,9 @@ function normalizeRow(values, row, errors) {
     if (name === null) addError(field, 'Enter a name of at most 180 characters.');
     else localized[field] = name;
   }
-  return errors.length === previous ? { orderId, customer, item: { id, name, sku, unit, quantity, status, aliases, ...localized } } : null;
+  const details = normalizeOrderDetails(values, { quantity, status, readQuantity, report: addError });
+  return errors.length === previous
+    ? { orderId, customer, item: { id, name, sku, unit, quantity, status, aliases, ...localized, ...details } } : null;
 }
 
 function collect(records, errors) {
@@ -481,6 +494,7 @@ function jsonRecords(json, errors) {
         orderId, customer: order.customer ?? order.customerReference, lineId: item.id ?? item.lineId,
         name: item.name ?? item.itemName, sku: item.sku, unit: item.unit, quantity: item.quantity,
         status: item.status ?? item.fulfillmentStatus, aliases: item.aliases, nameHi: item.nameHi, nameMr: item.nameMr,
+        ...Object.fromEntries(orderDetailFields.map(field => [field, item[field]])),
       } });
     }
   }
@@ -533,7 +547,7 @@ export async function orderTemplate(format) {
     const sheet = workbook.addWorksheet('Orders', { views: [{ state: 'frozen', ySplit: 1 }] });
     sheet.addRow(columns).font = { bold: true };
     columns.forEach((_, index) => { sheet.getColumn(index + 1).width = 23; });
-    for (const column of [1, 2, 3, 5]) sheet.getColumn(column).numFmt = '@';
+    for (const column of [1, 2, 3, 5, Object.keys(fields).indexOf('substituteSku') + 1]) sheet.getColumn(column).numFmt = '@';
     return {
       filename: name,
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

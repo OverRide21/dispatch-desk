@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import DispatchWorkspace from './dispatch-workspace.jsx';
+import { editLockReason } from '../../src/order-policies.mjs';
+import { ReceiptHistory, ShipmentTimeline, StockOptions } from './order-extras.jsx';
 import { prompts, useDispatch } from './use-dispatch.js';
+import VoiceUsage from './voice-usage.jsx';
 
 const glyphs = {
   mark: <><path d="M3.5 12h2.2m2.1-4.3v8.6m4.2-12v15.4m4.2-12v8.6m2.1-4.3h2.2" /></>,
@@ -24,13 +27,15 @@ function Icon({ name, size = 20 }) {
   );
 }
 
-const wave = [9, 15, 23, 12, 29, 42, 56, 34, 19, 36, 69, 49, 26, 43, 64, 90, 60, 31, 49, 76, 100, 64, 38, 61, 82, 48, 30, 45, 66, 44, 26, 52, 33, 18, 30, 43, 27, 16, 24, 13, 8];
+const wave = [25, 53, 38, 82, 100, 65, 42, 63, 25];
 const replyProviderLabels = {
+  auto: 'Automatic routing',
   groq: 'Groq · Qwen 27B',
   ollama: 'Local · Qwen 4B',
-  'ollama-dhee': 'Local · Dhee 4B (8-bit)',
-  rules: 'Built-in',
+  'ollama-hari': 'Local · Hari 4B (8-bit)',
+  rules: 'Fast · Local order engine',
 };
+const interpretationLabels = { ...replyProviderLabels, sarvam: 'Sarvam 105B', 'order-data': 'Order lookup', controls: 'Dispatch Desk controls' };
 
 function VoiceStage({ model, meter, desk }) {
   const canSpeak = Boolean(model.session?.voiceEnabled && model.voiceReady);
@@ -41,37 +46,34 @@ function VoiceStage({ model, meter, desk }) {
     ? 'processing'
     : voiceError ? 'error' : interrupted ? 'interrupted' : model.audioState;
 
-  let label = 'Ready to listen';
-  let description = 'Speak in the selected language.';
+  let label = 'Ready';
   if (!model.session) {
     label = model.error ? 'Connection interrupted' : 'Connecting';
-    description = model.error ? 'Reconnect to open this order.' : 'Getting this order ready.';
   } else if (model.startingMic) {
     label = 'Opening microphone';
-    description = 'Allow microphone access to start your call.';
   } else if (state === 'processing') {
     label = 'Checking the order';
-    description = 'The desk is reviewing your request.';
   } else if (voiceError) {
     label = 'Voice needs attention';
-    description = 'Check the message below. You can also continue by text.';
   } else if (!canSpeak) {
     label = model.session.voiceEnabled ? 'Getting voice ready' : 'Text support';
-    description = 'Type an order request below.';
   } else if (state === 'speaking') {
     label = 'Agent speaking';
-    description = 'You can interrupt to make a correction.';
   } else if (interrupted) {
-    label = 'You interrupted';
-    description = 'Go ahead. The desk is listening.';
+    label = 'Listening again';
   } else if (model.callActive) {
     label = 'Listening';
   }
 
   return (
     <section className="voice-stage" id="voice-stage" data-state={state} data-voice-enabled={Boolean(model.session?.voiceEnabled)} aria-label="Voice controls">
-      <div className="stage-top">
+      <div className="stage-state">
         <span className="call-state" role="status"><span className="status-dot" />{label}</span>
+        <div className="voice-meter" ref={meter} hidden={!model.callActive} aria-hidden="true">
+          {wave.map((height, index) => <span key={index} style={{ '--bar': height / 100, '--phase': index % 7 }} />)}
+        </div>
+      </div>
+      <div className="stage-controls">
         <label className="stage-language" htmlFor="language">
           <span className="sr-only">Conversation language</span>
           <select id="language" value={model.language} disabled={!model.session || model.startingMic || model.busy || model.audioState === 'processing'} onChange={(event) => desk.current?.setLanguage(event.target.value)}>
@@ -80,19 +82,13 @@ function VoiceStage({ model, meter, desk }) {
             <option value="en-IN">English</option>
           </select>
         </label>
-      </div>
-      <div className="voice-meter" ref={meter} aria-hidden="true">
-        {wave.map((height, index) => <span key={index} style={{ '--bar': height / 100, '--phase': index % 7 }} />)}
-      </div>
-      <div className="stage-actions">
         {model.session?.voiceEnabled && <button className="action action-mic" id="mic" type="button" aria-pressed={model.callActive}
           disabled={!canSpeak || model.startingMic || (model.busy && !model.callActive)}
           onClick={() => desk.current?.toggleVoice()}>
-          <Icon name={model.callActive ? 'stop' : 'mic'} size={23} />
+          <Icon name={model.callActive ? 'stop' : 'mic'} size={18} />
           <span>{model.startingMic ? 'Opening mic…' : model.callActive ? 'End call' : 'Start voice'}</span>
         </button>}
       </div>
-      <p id="voice-label" className="stage-hint">{description}</p>
     </section>
   );
 }
@@ -113,7 +109,8 @@ function Conversation({ model, desk }) {
   const version = useRef(0);
   const messages = model.session?.messages;
   const turns = messages?.filter((message) => message.role === 'caller').length ?? 0;
-  const accepting = Boolean(model.session && !model.busy && !model.startingMic && model.audioState !== 'processing');
+  const modelName = model.replyProvider === 'ollama-hari' ? 'Hari 4B' : 'Qwen 4B';
+  const accepting = Boolean(model.session && !model.shippingOrder && !model.busy && !model.startingMic && model.audioState !== 'processing');
 
   useEffect(() => {
     const element = thread.current;
@@ -167,7 +164,31 @@ function Conversation({ model, desk }) {
             </option>
           ))}
         </select>
-        {model.replySource && <span>Last reply from {replyProviderLabels[model.replySource]}</span>}
+        {model.replyProvider !== 'auto' && <>
+          <label htmlFor="interpretation-mode">Interpretation</label>
+          <select id="interpretation-mode" value={model.interpretationMode}
+            disabled={model.busy || model.startingMic || model.audioState === 'processing'}
+            onChange={event => desk.current?.setInterpretationMode(event.target.value)}>
+            <option value="parser">Built-in parser</option>
+            <option value="llm" disabled={model.replyProvider === 'rules'}>LLM · selected model</option>
+          </select>
+        </>}
+        {model.replyProvider === 'auto' && <span>The order desk handles lookups and confirmations. A hosted model interprets other requests.</span>}
+        {model.replyProvider === 'rules' && <span>Select a model to enable LLM interpretation.</span>}
+        {model.interpretationMode === 'llm' && model.replyProvider === 'groq' &&
+          <span>Groq receives the request text and order line details.</span>}
+        {model.modelStatus && <span role="status">
+          {model.modelStatus === 'warming' ? `Warming up ${modelName}…`
+            : model.modelStatus === 'ready' ? `${modelName} is warmed up and ready.`
+            : `${modelName} could not warm up. Check Ollama, then retry.`}
+        </span>}
+        {model.modelStatus === 'unavailable' && <button className="action action-secondary" type="button"
+          onClick={() => void desk.current?.retryModel()}>Retry warm-up</button>}
+        {(model.replyProvider === 'auto' || model.interpretationMode === 'llm') && interpretationLabels[model.interpretationSource] &&
+          <span>Last handled by {interpretationLabels[model.interpretationSource]}</span>}
+        {model.replyProvider !== 'auto' && model.interpretationMode === 'parser' && model.replySource &&
+          <span>Last reply from {replyProviderLabels[model.replySource]}</span>}
+        {model.typedReplyMs !== null && <span>Last typed reply · {model.typedReplyMs} ms</span>}
       </div>}
       <ol className="transcript" id="transcript" ref={thread} data-has-turns={turns > 0} role="log" aria-labelledby="transcript-title" aria-live="polite" aria-relevant="additions text" tabIndex={0}>
         {messages?.length ? messages.map((message, index) => {
@@ -191,28 +212,35 @@ function Conversation({ model, desk }) {
       <form className="composer" id="message-form" onSubmit={send}>
         <label className="sr-only" htmlFor="message">Type an order request</label>
         <input id="message" name="message" ref={input} value={draft} placeholder={prompts[model.language].placeholder} lang={model.language} autoComplete="off" maxLength={500}
-          disabled={!model.session} required onChange={(event) => { version.current += 1; setDraft(event.target.value); }} />
+          disabled={!model.session} required onChange={(event) => {
+            version.current += 1;
+            setDraft(event.target.value);
+            if (event.target.value.trim()) desk.current?.holdShipping();
+          }} />
         <button className="action action-send" id="send" type="submit" disabled={!accepting || !draft.trim()}>
-          {model.busy && model.replyProvider === 'ollama-dhee' ? 'Waiting for Dhee…' : 'Send'} <Icon name="send" size={18} />
+          {model.busy && model.replyProvider === 'ollama-hari' ? 'Waiting for Hari…' : 'Send'} <Icon name="send" size={18} />
         </button>
       </form>
     </section>
   );
 }
 
-function OrderTicket({ model, desk }) {
+const lockLabels = { shipped: 'Shipped', packed: 'Packed', cutoff: 'Cutoff passed' };
+
+function OrderTicket({ model, desk, onUnauthorized }) {
   const [adding, setAdding] = useState(false);
   const session = model.session;
-  const order = session?.order;
+  const order = model.shippingOrder ?? session?.order;
   const items = order?.items.filter(item => item.quantity > 0 || item.status === 'shipped') ?? [];
   const pending = session?.pending;
+  const stockOffer = session?.stockOffer;
   const history = session?.history ?? [];
   const latest = history[0];
-  const shipped = items.filter(item => item.status === 'shipped').length;
+  const shipped = items.filter(item => editLockReason(item) === 'shipped').length;
   const ticketState = pending ? 'pending' : latest ? 'saved' : 'idle';
   const action = pending ?? latest;
-  const quantityUnit = action?.newItem?.unit ?? order?.items.find(item => item.id === action?.itemId)?.unit;
-  const accepting = Boolean(order && !model.busy && !model.startingMic && model.audioState !== 'processing');
+  const actionRows = (pending ? pending.updates : session?.receipt?.changes) ?? (action ? [action] : []);
+  const accepting = Boolean(order && !model.shippingOrder && !model.busy && !model.startingMic && model.audioState !== 'processing');
 
   async function addItem(event) {
     event.preventDefault();
@@ -231,14 +259,26 @@ function OrderTicket({ model, desk }) {
       <div className="ticket-identity">
         <span className="ticket-id" id="order-id">{order?.id ?? '—'}</span>
         <span className="ticket-customer" id="order-customer">{order?.customer ?? 'Loading customer…'}</span>
+        {order?.source === 'storefront' && <span className="change-note" role="status">
+          {model.shippingHeld && shipped < items.length ? 'Shipping paused while this order is being edited.' : ''}
+        </span>}
       </div>
+      {model.shippingOrder && <div className="order-table-wrap">
+        <p className="change-note">The order changed. Refresh before editing again.</p>
+        <button type="button" className="action action-secondary" disabled={model.busy}
+          onClick={() => void desk.current?.connect()}>Refresh order</button>
+      </div>}
       <div className="order-table-wrap">
         {order && <div className="ticket-actions">
           <button className="action action-secondary" type="button" aria-expanded={adding} disabled={!accepting}
-            onClick={() => setAdding(value => !value)}>{adding ? 'Close add item' : 'Add item'}</button>
+            onClick={() => {
+              if (!adding) desk.current?.holdShipping();
+              setAdding(!adding);
+            }}>{adding ? 'Close add item' : 'Add item'}</button>
         </div>}
-        {adding && <form className="add-item-form" onSubmit={addItem}>
-          <label className="add-item-name">Item name<input name="name" required maxLength={180} disabled={!accepting} /></label>
+        {adding && order && <form className="add-item-form" onSubmit={addItem} onChange={() => desk.current?.holdShipping()}>
+          <label className="add-item-name">{order.source === 'storefront' ? 'Catalog name or SKU' : 'Item name'}
+            <input name="name" required maxLength={180} disabled={!accepting} /></label>
           <label>Quantity<input name="quantity" type="number" min="1" max="1000000" step="1" required disabled={!accepting} /></label>
           <label>Unit<select name="unit" defaultValue="pieces" disabled={!accepting}>
             {['pieces', 'bags', 'boxes', 'kg', 'litres', 'bottles', 'packets'].map(unit => <option key={unit}>{unit}</option>)}
@@ -248,37 +288,55 @@ function OrderTicket({ model, desk }) {
         <table className="order-table">
           <thead><tr><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Dispatch</th></tr></thead>
           <tbody id="order-items">
-            {items.length ? items.map((item) => <tr key={item.id} data-item={item.id}>
+            {items.length ? items.map((item) => {
+              const locked = editLockReason(item);
+              return <tr key={item.id} data-item={item.id}>
               <th scope="row">{item.name}</th>
               <td className={history.some((entry) => entry.itemId === item.id) ? 'updated-quantity' : undefined}>
                 {item.quantity} {item.unit}
+                {item.backorderQuantity > 0 && <small className="order-quantity-note">{item.backorderQuantity} backordered</small>}
               </td>
-              <td><span className={item.status === 'shipped' ? 'row-status row-shipped' : 'row-status row-editable'}>
-                {item.status === 'shipped' && <Icon name="lock" size={15} />}{item.status === 'shipped' ? 'Shipped' : 'Editable'}
-              </span>{item.status !== 'shipped' && <button className="remove-item" type="button" disabled={!accepting}
+              <td><span className={locked ? 'row-status row-shipped' : 'row-status row-editable'}>
+                {locked && <Icon name="lock" size={15} />}{locked ? lockLabels[locked] : item.fulfillmentStage === 'picked' ? 'Picked · Editable' : 'Editable'}
+              </span>{!locked && <button className="remove-item" type="button" disabled={!accepting}
                 aria-label={`Remove ${item.name}`} onClick={() => void desk.current?.proposeItem({ type: 'remove', itemId: item.id, name: item.name })}>
                 Remove
               </button>}</td>
-            </tr>) : <tr><td colSpan={3}>{order ? 'No items on this order.' : 'Loading order items…'}</td></tr>}
+            </tr>;
+            }) : <tr><td colSpan={3}>{order ? 'No items on this order.' : 'Loading order items…'}</td></tr>}
           </tbody>
         </table>
       </div>
+      <ShipmentTimeline items={items} />
+      {stockOffer && <StockOptions offer={stockOffer} disabled={!accepting} language={model.language}
+        onChoose={option => void desk.current?.chooseStock(option)} />}
       <div className="ticket-perforation" aria-hidden="true" />
       <div className="ticket-change" id="pending" aria-live="polite">
         <div className="change-title">
           <Icon name={ticketState === 'saved' ? 'check' : 'clock'} size={18} />
           <h3>{pending ? 'Awaiting confirmation' : latest ? 'Change saved' : 'Proposed change'}</h3>
         </div>
-        {action ? <>
-          <p className="change-item">{action.from === 0 ? (pending ? 'Add ' : 'Added ') : action.to === 0 ? (pending ? 'Remove ' : 'Removed ') : ''}{action.name}</p>
-          <div className="change-values">
-            <span><small>Before</small><strong>{action.from}</strong></span>
-            <Icon name="arrow" size={24} />
-            <span><small>{pending ? 'Proposed' : 'Saved'}</small><strong>{action.to}</strong></span>
-            {quantityUnit && <span className="change-unit">{quantityUnit}</span>}
-          </div>
+        {actionRows.length ? <>
+          {actionRows.map(row => {
+            const unit = row.unit ?? row.newItem?.unit ?? order?.items.find(item => item.id === row.itemId)?.unit;
+            return <div key={row.itemId}>
+              <p className="change-item">{row.from === 0 ? (pending ? 'Add ' : 'Added ') : row.to === 0 ? (pending ? 'Remove ' : 'Removed ') : ''}{row.name}</p>
+              <div className="change-values">
+                <span><small>Before</small><strong>{row.from}</strong></span>
+                <Icon name="arrow" size={24} />
+                <span><small>{pending ? 'Proposed' : 'Saved'}</small><strong>{row.to}</strong></span>
+                {unit && <span className="change-unit">{unit}</span>}
+              </div>
+              {row.backorderQuantity > 0 && <p className="change-note">{row.backorderQuantity} {unit} on backorder.</p>}
+              {row.from === row.to && row.backorderQuantity === 0 && <p className="change-note">
+                {pending ? 'Allocate the remaining backorder from stock.' : 'Backorder allocated from stock.'}
+              </p>}
+            </div>;
+          })}
           {pending && <button className="action action-primary ticket-confirm" type="button" disabled={!accepting}
-            onClick={() => void desk.current?.submit(prompts[model.language].confirm)}>Confirm item change</button>}
+            onClick={() => void desk.current?.submit(prompts[model.language].confirm)}>
+            {actionRows.length > 1 ? 'Confirm both item changes' : 'Confirm item change'}
+          </button>}
         </> : <p className="change-note">Proposed edits will appear here before you confirm them.</p>}
       </div>
       <section className="ticket-history" aria-labelledby="history-title" id="change-log">
@@ -298,13 +356,16 @@ function OrderTicket({ model, desk }) {
           })}</ol> : <p className="change-note">Confirmed edits appear here.</p>}
         </div>
       </section>
+      {order && <ReceiptHistory orderId={order.id} revision={order.revision} receipt={session.receipt} onUnauthorized={onUnauthorized} />}
     </aside>
   );
 }
 
 function OrderCall({ orderId, onUnauthorized, onBack }) {
   const { model, meter, desk } = useDispatch(orderId, onUnauthorized);
-  const recentChange = model.session?.pending ?? model.session?.history?.[0];
+  const { pending, stockOffer, receipt, history } = model.session ?? {};
+  const recentChange = pending ?? history?.[0];
+  const changeCount = pending?.updates?.length ?? receipt?.changes.length ?? 0;
 
   return (
     <>
@@ -318,16 +379,20 @@ function OrderCall({ orderId, onUnauthorized, onBack }) {
           <div className="call-column">
             <VoiceStage model={model} meter={meter} desk={desk} />
             <ErrorNote error={model.error?.area === 'voice' ? model.error : null} recover={() => desk.current?.connect()} />
-            {recentChange && <a className="ticket-jump" href="#order-record" data-state={model.session.pending ? 'pending' : 'saved'}>
-              <span>{model.session.pending ? 'Proposed' : 'Saved'} <strong>{recentChange.name}: {recentChange.from} → {recentChange.to}</strong></span>
+            {(stockOffer || recentChange) && <a className="ticket-jump" href="#order-record" data-state={stockOffer || pending ? 'pending' : 'saved'}>
+              <span>{stockOffer ? 'Stock options' : pending ? 'Proposed' : 'Saved'}{' '}
+                <strong>{stockOffer ? stockOffer.name : changeCount > 1
+                  ? `${changeCount} item changes` : `${recentChange.name}: ${recentChange.from} → ${recentChange.to}`}</strong>
+              </span>
               <Icon name="arrow" size={18} />
             </a>}
             <Conversation model={model} desk={desk} />
+            {model.session?.voiceEnabled && <VoiceUsage sessionId={model.session.sessionId} onUnauthorized={onUnauthorized} />}
           </div>
-          <OrderTicket model={model} desk={desk} />
+          <OrderTicket model={model} desk={desk} onUnauthorized={onUnauthorized} />
         </div>
       </main>
-      <footer className="site-footer"><Icon name="lock" size={16} /> Shipped items are locked. Edits are applied after you confirm them.</footer>
+      <footer className="site-footer"><Icon name="lock" size={16} /> Packed items, shipped items, and items past their cutoff are locked. Edits are applied after you confirm them.</footer>
     </>
   );
 }

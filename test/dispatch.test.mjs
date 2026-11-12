@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDispatchHandlers } from '../src/http.mjs';
 import { createSession, handleTurn, snapshot } from '../src/orders.mjs';
+import { createStore } from '../src/store.mjs';
 import { dialogueCases } from './dialogue-cases.mjs';
 import { actor, fixtureOrder, fixtureStore, orderId, workspaceId } from './order-fixture.mjs';
 
@@ -190,20 +191,20 @@ test('new items and removals are confirmed, audited, and shipped items stay lock
   assert.equal(restored.order.items.find(line => line.id === item.id).quantity, 4);
 });
 
-test('the desk can switch between Groq, local Qwen, Dhee, and built-in replies', async (context) => {
+test('the desk can switch between Groq, local Qwen, Hari, and built-in replies', async (context) => {
   const previousKey = process.env.GROQ_API_KEY;
   const previousLocal = process.env.OLLAMA_ENABLED;
-  const previousDhee = process.env.OLLAMA_DHEE_ENABLED;
+  const previousHari = process.env.OLLAMA_HARI_ENABLED;
   process.env.GROQ_API_KEY = 'test-key';
   process.env.OLLAMA_ENABLED = '1';
-  process.env.OLLAMA_DHEE_ENABLED = '0';
+  process.env.OLLAMA_HARI_ENABLED = '0';
   context.after(() => {
     if (previousKey === undefined) delete process.env.GROQ_API_KEY;
     else process.env.GROQ_API_KEY = previousKey;
     if (previousLocal === undefined) delete process.env.OLLAMA_ENABLED;
     else process.env.OLLAMA_ENABLED = previousLocal;
-    if (previousDhee === undefined) delete process.env.OLLAMA_DHEE_ENABLED;
-    else process.env.OLLAMA_DHEE_ENABLED = previousDhee;
+    if (previousHari === undefined) delete process.env.OLLAMA_HARI_ENABLED;
+    else process.env.OLLAMA_HARI_ENABLED = previousHari;
   });
   const providers = [];
   let choice = '2';
@@ -211,7 +212,7 @@ test('the desk can switch between Groq, local Qwen, Dhee, and built-in replies',
     const { model, messages, format } = JSON.parse(request.body);
     providers.push(model);
     if (url.startsWith('http://127.0.0.1:11434/')) {
-      if (model === 'dhee-indic:q8') {
+      if (model === 'hari:q8') {
         return Response.json({ message: { content: format.properties.wording ? '{"wording":"2"}' : '{"opener":"none"}' } });
       }
       return Response.json({ message: { content: '{"opener":"understood"}' } });
@@ -225,17 +226,17 @@ test('the desk can switch between Groq, local Qwen, Dhee, and built-in replies',
   const store = await fixtureStore(context);
   const handlers = createDispatchHandlers({ store, identify: () => actor });
   const disabled = await call(handlers, 'session').then(r => r.json());
-  assert.deepEqual(disabled.replyProviders, ['groq', 'ollama', 'rules']);
-  process.env.OLLAMA_DHEE_ENABLED = '1';
+  assert.deepEqual(disabled.replyProviders, ['rules', 'auto', 'groq', 'ollama']);
+  process.env.OLLAMA_HARI_ENABLED = '1';
   const view = await call(handlers, 'session').then(r => r.json());
-  assert.deepEqual(view.replyProviders, ['groq', 'ollama', 'ollama-dhee', 'rules']);
+  assert.deepEqual(view.replyProviders, ['rules', 'auto', 'groq', 'ollama', 'ollama-hari']);
   const headers = { 'Content-Type': 'application/json', 'X-Session-Id': view.sessionId };
   const turn = async (text, replyProvider) => {
     const response = await call(handlers, 'turn', { headers, body: { text, language: 'mr-IN', replyProvider } });
     assert.equal(response.status, 200);
     return response.json();
   };
-  const proposal = await turn('तांदूळ 12 करा आणि साखर काढा');
+  const proposal = await turn('तांदूळ 12 करा आणि साखर काढा', 'groq');
   assert.equal(proposal.replySource, 'groq');
   assert.match(proposal.reply, /साखर.*रवाना.*बारा.*ठेवू का\?/u);
   assert.equal(proposal.pending.to, 12);
@@ -243,33 +244,39 @@ test('the desk can switch between Groq, local Qwen, Dhee, and built-in replies',
   const local = await turn('बारा नको दहा करा', 'ollama');
   assert.equal(local.replySource, 'ollama');
   assert.equal(local.pending.to, 10);
-  const dhee = await turn('दहा नको अकरा करा', 'ollama-dhee');
-  assert.equal(dhee.replySource, 'ollama-dhee');
-  assert.match(dhee.reply, /^ठीक आहे, तांदळाच्या अकरा पिशव्या/u);
-  assert.equal(dhee.pending.to, 11);
-  assert.equal(dhee.order.items.find(item => item.id === 'rice').quantity, 20);
-  const builtIn = await turn('नऊ करा', 'rules');
+  const hari = await turn('दहा नको अकरा करा', 'ollama-hari');
+  assert.equal(hari.replySource, 'ollama-hari');
+  assert.match(hari.reply, /^ठीक आहे, तांदळाच्या अकरा पिशव्या/u);
+  assert.equal(hari.pending.to, 11);
+  assert.equal(hari.order.items.find(item => item.id === 'rice').quantity, 20);
+  const builtIn = await turn('नऊ करा');
   assert.equal(builtIn.replySource, 'rules');
   assert.equal(builtIn.pending.to, 9);
   choice = 'Invalid model reply';
   const saved = await turn('हो, बदल करा', 'groq');
   assert.equal(saved.replySource, 'rules');
   assert.equal(saved.order.items.find(item => item.id === 'rice').quantity, 9);
-  assert.deepEqual(providers, ['qwen/qwen3.8-27b', 'qwen3.5:4b', 'dhee-indic:q8', 'qwen/qwen3.8-27b']);
+  assert.deepEqual(providers, ['qwen/qwen3.8-27b', 'qwen3.5:4b', 'hari:q8', 'qwen/qwen3.8-27b']);
 
-  const unclear = await turn('काहीतरी बदलायचं आहे', 'ollama-dhee');
-  const repeated = await turn('काहीतरी बदलायचं आहे', 'ollama-dhee');
-  assert.equal(unclear.replySource, 'ollama-dhee');
-  assert.equal(repeated.replySource, 'ollama-dhee');
+  const unclear = await turn('काहीतरी बदलायचं आहे', 'ollama-hari');
+  const repeated = await turn('काहीतरी बदलायचं आहे', 'ollama-hari');
+  assert.equal(unclear.replySource, 'ollama-hari');
+  assert.equal(repeated.replySource, 'ollama-hari');
   assert.notEqual(repeated.reply, unclear.reply);
   assert.equal(repeated.pending, null);
-  const blocked = await turn('साखर काढा.', 'ollama-dhee');
-  assert.equal(blocked.replySource, 'ollama-dhee');
+  const blocked = await turn('साखर काढा.', 'ollama-hari');
+  assert.equal(blocked.replySource, 'ollama-hari');
   assert.match(blocked.reply, /^साखर.*रवाना.*काढताही येणार नाही/u);
   assert.equal(blocked.pending, null);
 });
 
 test('overlapping requests cannot replace a reply while Ollama styles it', async (context) => {
+  const previousLocal = process.env.OLLAMA_ENABLED;
+  process.env.OLLAMA_ENABLED = '1';
+  context.after(() => {
+    if (previousLocal === undefined) delete process.env.OLLAMA_ENABLED;
+    else process.env.OLLAMA_ENABLED = previousLocal;
+  });
   const store = await fixtureStore(context);
   let release;
   const hold = new Promise(resolve => { release = resolve; });
@@ -281,10 +288,10 @@ test('overlapping requests cannot replace a reply while Ollama styles it', async
   });
   const view = await call(handlers, 'session').then(r => r.json());
   const headers = { 'Content-Type': 'application/json', 'X-Session-Id': view.sessionId };
-  const send = text => call(handlers, 'turn', { headers, body: { text, language: 'en-IN' } });
+  const send = text => call(handlers, 'turn', { headers, body: { text, language: 'en-IN', replyProvider: 'ollama' } });
   const first = send('Change rice to 12');
-  await started;
   try {
+    await Promise.race([started, first.then(() => assert.fail('Ollama was skipped'))]);
     const busy = await send('Confirm');
     assert.equal(busy.status, 409);
     assert.equal((await busy.json()).code, 'session-busy');
@@ -294,8 +301,8 @@ test('overlapping requests cannot replace a reply while Ollama styles it', async
   assert.equal((await first.then(r => r.json())).pending.to, 12);
 });
 
-test('a Dhee confirmation waits for the model and remains retryable after failure', async (context) => {
-  for (const name of ['OLLAMA_ENABLED', 'OLLAMA_DHEE_ENABLED']) {
+test('a Hari confirmation waits for the model and remains retryable after failure', async (context) => {
+  for (const name of ['OLLAMA_ENABLED', 'OLLAMA_HARI_ENABLED']) {
     const previous = process.env[name];
     process.env[name] = '1';
     context.after(() => {
@@ -307,7 +314,7 @@ test('a Dhee confirmation waits for the model and remains retryable after failur
   const modelResponse = Promise.withResolvers();
   const model = context.mock.method(globalThis, 'fetch', async (_url, request) => {
     const { model, format } = JSON.parse(request.body);
-    assert.equal(model, 'dhee-indic:q8');
+    assert.equal(model, 'hari:q8');
     assert.deepEqual(format.properties.opener.enum, ['none']);
     started.resolve();
     return modelResponse.promise;
@@ -322,9 +329,9 @@ test('a Dhee confirmation waits for the model and remains retryable after failur
   const proposal = await send('Change rice to 12', 'rules').then(response => response.json());
   headers['X-Session-Revision'] = String(proposal.revision);
 
-  const confirmation = send('Confirm.', 'ollama-dhee');
+  const confirmation = send('Confirm.', 'ollama-hari');
   try {
-    await Promise.race([started.promise, confirmation.then(() => assert.fail('Dhee was skipped'))]);
+    await Promise.race([started.promise, confirmation.then(() => assert.fail('Hari was skipped'))]);
     const order = await store.getOrder(actor.workspaceId, view.order.id);
     assert.equal(order.items.find(item => item.id === 'rice').quantity, 20);
   } finally {
@@ -332,14 +339,14 @@ test('a Dhee confirmation waits for the model and remains retryable after failur
   }
   const failed = await confirmation;
   assert.equal(failed.status, 503);
-  assert.equal((await failed.json()).code, 'dhee-unavailable');
+  assert.equal((await failed.json()).code, 'hari-unavailable');
   assert.equal((await store.getCall(view.sessionId, actor)).revision, proposal.revision);
 
   model.mock.mockImplementation(async () => Response.json({ message: { content: '{"opener":"none"}' } }));
-  const retry = await send('Confirm.', 'ollama-dhee');
+  const retry = await send('Confirm.', 'ollama-hari');
   assert.equal(retry.status, 200);
   const saved = await retry.json();
-  assert.equal(saved.replySource, 'ollama-dhee');
+  assert.equal(saved.replySource, 'ollama-hari');
   assert.equal(saved.order.items.find(item => item.id === 'rice').quantity, 12);
   assert.equal(saved.history.length, 1);
 });
@@ -356,4 +363,243 @@ test('imported names and SKUs work without a hardcoded product catalog', () => {
   assert.equal(session.pending?.to, 4);
   handleTurn(session, { text: 'हो करा', language: 'mr-IN' });
   assert.deepEqual(session.order.items.map(item => item.quantity), [4, 6]);
+});
+
+test('a storefront product can be addressed without reading its parenthesized pack size', () => {
+  const session = createSession({ id: 'SHOP-1', customer: 'Customer', items: [
+    { id: 'SUGAR', sku: 'KM-SUGAR', name: 'Sugar (1 kg)', quantity: 1, unit: 'bags', status: 'pending' },
+  ] }, 'en-IN');
+  handleTurn(session, { text: 'Set sugar to 2 bags.', language: 'en-IN' });
+  assert.equal(session.pending?.itemId, 'SUGAR');
+  assert.equal(session.pending?.to, 2);
+});
+
+test('Basmati Rice quantity replacements understand mixed-script names and attached Marathi markers', () => {
+  const item = { id: 'KM-RICE', sku: 'KM-RICE', name: 'Basmati Rice (1 kg)', nameHi: 'बासमती चावल',
+    nameMr: 'बासमती तांदूळ', quantity: 4, unit: 'bags', status: 'pending' };
+  const order = { id: 'SHOP-1', customer: 'Customer', items: [item] };
+  const mixed = '4 bag बासमती riceऐवजी 2 bag बासमती rice करा।';
+  for (const text of [mixed, 'बासमती तांदळाच्या ४ पिशव्यांऐवजी २ पिशव्या करा।', '4 bag बासमती riceऐवजी2 bag करा।']) {
+    const session = createSession(order, 'mr-IN');
+    const result = handleTurn(session, { text, language: 'mr-IN' });
+    assert.deepEqual(session.pending, { itemId: 'KM-RICE', name: item.name, from: 4, to: 2 });
+    assert.match(result.reply, /बासमती तांदूळ.*दोन पिशव्या/u);
+    assert.equal(session.order.items[0].quantity, 4);
+    handleTurn(session, { text: 'हो, बदल करा.', language: 'mr-IN' });
+    assert.equal(session.order.items[0].quantity, 2);
+  }
+
+  const shipped = createSession({ ...order, items: [{ ...item, status: 'shipped' }] }, 'mr-IN');
+  const rejected = handleTurn(shipped, { text: mixed, language: 'mr-IN' });
+  assert.match(rejected.reply, /बासमती तांदूळ.*रवाना/u);
+  assert.equal(shipped.pending, null);
+
+  const multiplePacks = createSession({ ...order, items: [item,
+    { ...item, id: 'RICE-5KG', sku: 'RICE-5KG', name: 'Basmati Rice (5 kg)' },
+  ] }, 'mr-IN');
+  handleTurn(multiplePacks, { text: mixed, language: 'mr-IN' });
+  assert.equal(multiplePacks.pending, null);
+});
+
+test('compact quantities, arrows and Romanized Marathi work without a model', () => {
+  for (const text of ['tandul 12pishvya kara', 'rice 20bags → 12bags', '20 bori chawal ke badle 12 bori chawal kar do']) {
+    const session = createSession(fixtureOrder(), 'mr-IN');
+    handleTurn(session, { text, language: 'mr-IN' });
+    assert.equal(session.pending?.to, 12, text);
+  }
+  const session = createSession(fixtureOrder(), 'en-IN');
+  handleTurn(session, { text: 'Set rice to 12 to 15 bags.', language: 'en-IN' });
+  assert.equal(session.pending, null);
+});
+
+test('LLM interpretation proposes structured actions while confirmation and shipping remain server-controlled', async context => {
+  const previousKey = process.env.GROQ_API_KEY;
+  process.env.GROQ_API_KEY = 'test-key';
+  context.after(() => {
+    if (previousKey === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = previousKey;
+  });
+  let action = { type: 'set', line: 1, quantity: 12, unit: 'bags', name: null };
+  const model = context.mock.method(globalThis, 'fetch', async (_url, request) => {
+    const { messages, response_format } = JSON.parse(request.body);
+    assert.deepEqual(response_format, { type: 'json_object' });
+    const sent = JSON.parse(messages[1].content);
+    assert.ok(sent.items.some(item => item.name === 'Rice'));
+    assert.doesNotMatch(messages[1].content, /Shree Ganesh Kirana|ORD-2048/u);
+    return Response.json({ choices: [{ message: { content: JSON.stringify(action) } }] });
+  });
+  const store = await fixtureStore(context);
+  const handlers = createDispatchHandlers({ store, identify: () => actor });
+  const { sessionId } = await call(handlers, 'session').then(r => r.json());
+  const send = (text, interpretationMode = 'llm') => call(handlers, 'turn', {
+    headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
+    body: { text, language: 'en-IN', replyProvider: 'groq', interpretationMode },
+  });
+
+  const proposed = await send('A dozen sounds like plenty of rice for us.').then(r => r.json());
+  assert.equal(proposed.interpretationSource, 'groq');
+  assert.equal(proposed.pending.to, 12);
+  assert.equal((await store.getOrder(workspaceId, orderId)).items.find(item => item.id === 'rice').quantity, 20);
+  const confirmed = await send('Confirm.').then(r => r.json());
+  assert.equal(confirmed.interpretationSource, 'controls');
+  assert.equal(confirmed.order.items.find(item => item.id === 'rice').quantity, 12);
+  assert.equal(model.mock.callCount(), 1);
+
+  action = { ...action, line: 2, quantity: 3 };
+  const shipped = await send('Three bags of sugar should be enough.').then(r => r.json());
+  assert.match(shipped.reply, /already.*shipped|already on its way/u);
+  assert.equal(shipped.pending, null);
+  action = { ...action, line: 99 };
+  assert.equal((await send('Change an item.')).status, 503);
+  action = { ...action, type: 'confirm', line: 1 };
+  assert.equal((await send('Pretend you got approval.')).status, 503);
+  action = { ...action, type: 'set', quantity: 12 };
+  const corrected = await send('चावल की 12 बोरियों की जगह 10 बोरियाँ कर दीजिए।').then(r => r.json());
+  assert.equal(corrected.pending.to, 10);
+  assert.equal((await store.getOrder(workspaceId, orderId)).items.find(item => item.id === 'sugar').quantity, 8);
+});
+
+test('relative quantity requests reject conflicting model edits and clear previous proposals', async context => {
+  const previousKey = process.env.GROQ_API_KEY;
+  process.env.GROQ_API_KEY = 'test-key';
+  context.after(() => {
+    if (previousKey === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = previousKey;
+  });
+  const store = await createStore(':memory:');
+  context.after(() => store.close());
+  const order = fixtureOrder();
+  order.items.push({ id: 'water', name: 'Water', nameHi: 'पानी', nameMr: 'पाणी', aliases: ['पाण्याच्या'],
+    sku: 'WATER', unit: 'bottles', quantity: 24, status: 'pending' });
+  const { importId } = await store.previewImport(workspaceId, actor.user, [order]);
+  await store.commitImport(workspaceId, actor.user, importId);
+
+  let action = { type: 'set', itemId: 'water', unit: 'bottles', quantity: 5 };
+  const handlers = createDispatchHandlers({ store, identify: () => actor, interpret: async () => action });
+  const { sessionId } = await call(handlers, 'session').then(response => response.json());
+  const send = async (text, language = 'en-IN') => {
+    const response = await call(handlers, 'turn', {
+      headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
+      body: { text, language, replyProvider: 'groq', interpretationMode: 'llm' },
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const savedQuantity = async () => (await store.getOrder(workspaceId, orderId)).items.find(item => item.id === 'water').quantity;
+
+  assert.equal((await send('Set the water line to five bottles total.')).pending.to, 5);
+  for (const [request, language, clarification] of [
+    ['Add five bottles to the existing water line.', 'en-IN', /add five.*five the total/u],
+    ['पानी की पाँच बोतलें मौजूदा गिनती के ऊपर जोड़िए।', 'hi-IN', /पाँच और जोड़ूँ.*कुल पाँच/u],
+    ['पाण्याच्या आणखी पाच बाटल्या वाढवा.', 'mr-IN', /आणखी पाच.*एकूण पाच/u],
+  ]) {
+    const result = await send(request, language);
+    assert.equal(result.pending, null);
+    assert.match(result.reply, clarification);
+  }
+  assert.equal((await send('Five more bottles.')).pending, null);
+  assert.equal((await send('Confirm.')).pending, null);
+  assert.equal(await savedQuantity(), 24);
+
+  action = { ...action, type: 'add', name: 'Water' };
+  assert.equal((await send('Add five bottles of water.')).pending, null);
+  action = { ...action, type: 'increase', quantity: 6 };
+  assert.equal((await send('Add five bottles of water.')).pending, null);
+  action = { ...action, quantity: 5 };
+  const proposal = await send('Add five bottles of water.');
+  assert.equal(proposal.pending.from, 24);
+  assert.equal(proposal.pending.to, 29);
+  assert.match(proposal.reply, /from twenty four bottles to twenty nine bottles/u);
+  assert.equal(await savedQuantity(), 24);
+  await send('Confirm.');
+  assert.equal(await savedQuantity(), 29);
+
+  action = { ...action, type: 'set', itemId: 'sugar', unit: 'bags' };
+  const shipped = await send('Add five more bags of sugar.');
+  assert.equal(shipped.pending, null);
+  assert.match(shipped.reply, /already shipped/u);
+});
+
+test('automatic routing grounds lookups, uses Sarvam for edits and falls back to Groq once', async context => {
+  for (const key of ['SARVAM_API_KEY', 'GROQ_API_KEY']) {
+    const previous = process.env[key];
+    process.env[key] = 'test-credential';
+    context.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  let sarvamStatus = 200;
+  let groqStatus = 200;
+  let action = { type: 'increase', line: 1, quantity: 5, unit: 'bags', name: null };
+  const requests = [];
+  context.mock.method(globalThis, 'fetch', async (url, request) => {
+    const payload = JSON.parse(request.body);
+    const sent = JSON.parse(payload.messages[1].content);
+    assert.deepEqual(Object.keys(sent).sort(), ['focus', 'items', 'request']);
+    assert.doesNotMatch(payload.messages[1].content, /Shree Ganesh Kirana|ORD-2048/u);
+    if (url === 'https://api.sarvam.ai/v1/chat/completions') {
+      requests.push('sarvam');
+      assert.equal(request.headers['api-subscription-key'], 'test-credential');
+      assert.equal(payload.model, 'sarvam-105b');
+      assert.equal(payload.reasoning_effort, null);
+      assert.equal(payload.response_format.json_schema.strict, true);
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(action) } }] }, { status: sarvamStatus });
+    }
+    assert.equal(url, 'https://api.groq.com/openai/v1/chat/completions');
+    requests.push('groq');
+    return Response.json({ choices: [{ message: { content: JSON.stringify(action) } }] }, { status: groqStatus });
+  });
+  const store = await fixtureStore(context);
+  const handlers = createDispatchHandlers({ store, identify: () => actor });
+  const session = await call(handlers, 'session').then(response => response.json());
+  assert.equal(session.defaultReplyProvider, 'auto');
+  assert.ok(session.replyProviders.includes('auto'));
+  const send = (text, language = 'en-IN') => call(handlers, 'turn', {
+    headers: { 'Content-Type': 'application/json', 'X-Session-Id': session.sessionId },
+    body: { text, language, replyProvider: 'auto' },
+  });
+  const turn = async (...args) => {
+    const response = await send(...args);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  const shipped = await turn('क्या चीनी भेज दी गई है?', 'hi-IN');
+  assert.equal(shipped.interpretationSource, 'order-data');
+  assert.match(shipped.reply, /चीनी/u);
+  assert.doesNotMatch(shipped.reply, /चावल/u);
+  const eta = await turn('When will my order arrive?');
+  assert.equal(eta.interpretationSource, 'order-data');
+  assert.match(eta.reply, /estimated delivery date/u);
+  const stock = await turn('तांदळाचा साठा आहे का?', 'mr-IN');
+  assert.equal(stock.interpretationSource, 'order-data');
+  assert.match(stock.reply, /उपलब्ध प्रमाण/u);
+  assert.deepEqual(requests, []);
+
+  const mixed = await turn('Is the rice in stock? Also add five bags of rice.');
+  assert.equal(mixed.interpretationSource, 'sarvam');
+  assert.equal(mixed.pending.to, 25);
+  assert.equal((await store.getOrder(workspaceId, orderId)).items.find(item => item.id === 'rice').quantity, 20);
+  const lookup = await turn('Has sugar shipped?');
+  assert.equal(lookup.interpretationSource, 'order-data');
+  assert.equal(lookup.pending.to, 25);
+  const confirmed = await turn('Confirm.');
+  assert.equal(confirmed.interpretationSource, 'controls');
+  assert.equal(confirmed.order.items.find(item => item.id === 'rice').quantity, 25);
+  assert.deepEqual(requests, ['sarvam']);
+
+  action = { type: 'clarify', line: null, quantity: null, unit: null, name: null };
+  assert.equal((await turn('Change something.')).interpretationSource, 'sarvam');
+  assert.deepEqual(requests, ['sarvam', 'sarvam']);
+  sarvamStatus = 503;
+  action = { type: 'set', line: 1, quantity: 12, unit: 'bags', name: null };
+  const fallback = await turn('A dozen bags of rice is enough.');
+  assert.equal(fallback.interpretationSource, 'groq');
+  assert.equal(fallback.pending.to, 12);
+  groqStatus = 503;
+  assert.equal((await send('Make that eleven bags instead.')).status, 503);
+  assert.deepEqual(requests, ['sarvam', 'sarvam', 'sarvam', 'groq', 'sarvam', 'groq']);
+  assert.equal((await store.getOrder(workspaceId, orderId)).items.find(item => item.id === 'rice').quantity, 25);
+  delete process.env.SARVAM_API_KEY;
+  groqStatus = 200;
+  assert.equal((await turn('Make that a dozen bags.')).interpretationSource, 'groq');
+  assert.deepEqual(requests.slice(-2), ['groq', 'groq']);
 });

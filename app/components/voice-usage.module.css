@@ -1,0 +1,83 @@
+.panel {
+  margin-block: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  min-width: 0;
+}
+
+.heading {
+  min-height: 44px;
+  padding: 0.63rem 0.9rem;
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: 0.93rem;
+  font-weight: 740;
+}
+
+.heading:hover { background: var(--wash); }
+
+.body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
+  gap: 0.75rem 1rem;
+  margin: 0;
+}
+
+.metrics dt {
+  color: var(--muted);
+  font-size: 0.93rem;
+  font-weight: 650;
+}
+
+.metrics dd {
+  display: grid;
+  gap: 0.12rem;
+  margin: 0.2rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.metrics span,
+.note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.93rem;
+}
+
+.form {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.form label {
+  display: grid;
+  gap: 0.2rem;
+  width: min(100%, 22rem);
+  font-size: 0.93rem;
+  font-weight: 650;
+}
+
+.form input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #b77863;
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}

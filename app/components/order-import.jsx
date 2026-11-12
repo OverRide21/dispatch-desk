@@ -15,6 +15,16 @@ const columns = [
   ['aliases', 'Spoken aliases', false],
   ['nameHi', 'Hindi item name', false],
   ['nameMr', 'Marathi item name', false],
+  ['availableQuantity', 'Available quantity', false],
+  ['backorderAllowed', 'Backorder allowed', false],
+  ['substituteSku', 'Substitute SKU', false],
+  ['backorderQuantity', 'Backorder quantity', false],
+  ['fulfillmentStage', 'Fulfillment stage', false],
+  ['pickedAt', 'Picked at', false],
+  ['packedAt', 'Packed at', false],
+  ['shippedAt', 'Shipped at', false],
+  ['deliveryEta', 'Delivery ETA', false],
+  ['editCutoffAt', 'Edit cutoff at', false],
 ];
 
 const formatNames = { csv: 'CSV', xlsx: 'Excel', json: 'JSON' };

@@ -6,6 +6,8 @@ const failureWindow = 60_000;
 const maxFailures = 5;
 const noStore = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+const loopbackHostHeader = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i;
+const loopbackAddresses = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 function authError(status, code, message) {
   return Object.assign(new Error(message), { status, code });
@@ -55,7 +57,7 @@ function expectedOrigin(request) {
     // loopback Host on the same port so the browser's Origin can be checked exactly.
     const host = request.headers.get('host');
     if (!configured && loopbackHosts.has(url.hostname) && host &&
-        /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i.test(host)) {
+        loopbackHostHeader.test(host)) {
       const local = URL.parse(`${url.protocol}//${host}`);
       if (local && local.port === url.port) return local;
     }
@@ -72,6 +74,20 @@ export function assertSameOrigin(request) {
   if (fetchSite && !['same-origin', 'none'].includes(fetchSite) || origin && origin !== expected.origin) {
     throw authError(403, 'cross-origin', 'Open Dispatch Desk directly to complete this request.');
   }
+}
+
+export function localAccessEnabled(request) {
+  if (process.env.DISPATCH_LOCAL_ACCESS !== '1' || process.env.VERCEL ||
+      process.env.DISPATCH_PUBLIC_ORIGIN?.trim() || process.env.TURSO_DATABASE_URL?.trim() ||
+      process.env.TURSO_AUTH_TOKEN?.trim() || !loopbackHostHeader.test(request.headers.get('host') ?? '') ||
+      !loopbackHosts.has(new URL(request.url).hostname)) return false;
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (request.headers.has('forwarded') || (forwardedHost && !loopbackHostHeader.test(forwardedHost)) ||
+      (forwardedFor && !loopbackAddresses.has(forwardedFor.toLowerCase()))) return false;
+  const origin = request.headers.get('origin');
+  const site = request.headers.get('sec-fetch-site');
+  return (!origin || origin === expectedOrigin(request).origin) && (!site || site === 'same-origin' || site === 'none');
 }
 
 function readToken(request) {
@@ -93,6 +109,10 @@ function sessionCookie(request, token, maxAge) {
 }
 
 export async function authenticate(request, store) {
+  if (localAccessEnabled(request)) {
+    const workspaceId = process.env.DISPATCH_WORKSPACE_ID?.trim() || 'default';
+    return { workspaceId, user: 'Local operator', role: 'admin', sessionId: `local-access:${workspaceId}` };
+  }
   const config = credentials();
   const token = readToken(request);
   if (!config || !token) return null;

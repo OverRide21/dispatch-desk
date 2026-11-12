@@ -55,11 +55,12 @@ a { color: inherit; text-underline-offset: 0.22em; }
   left: 0.75rem;
   z-index: 2;
   padding: 0.75rem 1rem;
+  clip-path: inset(50%);
   transform: translateY(-170%);
   background: var(--ink);
   color: var(--paper);
 }
-.skip-link:focus-visible { transform: translateY(0); }
+.skip-link:focus-visible { clip-path: none; transform: translateY(0); }
 .icon { display: inline-block; flex: none; vertical-align: middle; }
 
 .dispatch {
@@ -148,20 +149,25 @@ a { color: inherit; text-underline-offset: 0.22em; }
 .call-column { min-width: 0; }
 .voice-stage {
   --voice-level: 0.64;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem 0.65rem;
   min-width: 0;
-  padding: clamp(0.95rem, 2.6vw, 1.35rem);
+  padding: 0.45rem 0.6rem;
   border: 1px solid var(--coral-edge);
   border-radius: 16px;
   background: var(--coral);
   color: var(--coral-ink);
 }
 .voice-stage :focus-visible { outline-color: var(--ink); }
-.stage-top {
+.stage-state, .stage-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.45rem;
 }
+.stage-controls { flex-wrap: wrap; }
 .call-state {
   display: inline-flex;
   align-items: center;
@@ -169,11 +175,12 @@ a { color: inherit; text-underline-offset: 0.22em; }
   font-size: 0.87rem;
   font-weight: 720;
 }
-.voice-stage[data-state="listening"] .status-dot, .voice-stage[data-state="speaking"] .status-dot { background: #284914; }
+.voice-stage[data-state="listening"] .status-dot, .voice-stage[data-state="speaking"] .status-dot,
+.voice-stage[data-state="interrupted"] .status-dot { background: var(--saved-ink); }
 .voice-stage[data-state="error"] .status-dot { outline: 1px solid var(--coral-ink); outline-offset: 2px; }
 .stage-language select {
   max-width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   padding: 0.34rem 0.52rem;
   border: 1px solid var(--coral-edge);
   border-radius: 8px;
@@ -186,42 +193,36 @@ a { color: inherit; text-underline-offset: 0.22em; }
 .voice-meter {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: clamp(2px, 0.55vw, 6px);
-  height: clamp(5rem, 9vw, 7.3rem);
-  margin: 0.18rem auto 0.42rem;
-  padding-inline: 0.2rem;
-  overflow: hidden;
+  flex: none;
+  gap: 2px;
+  height: 1rem;
 }
+.voice-meter[hidden] { display: none; }
 .voice-meter span {
-  width: clamp(2px, 0.65vw, 6px);
+  width: 2px;
   height: calc(100% * var(--bar));
-  border-radius: 5px;
-  background: #651e18;
+  border-radius: 4px;
+  background: var(--coral-edge);
   transform: scaleY(0.52);
   transition: transform 110ms var(--ease-out);
 }
-.voice-meter span:nth-child(4n + 1) { background: #6d2b20; }
 .voice-stage[data-state="listening"] .voice-meter span, .voice-stage[data-state="interrupted"] .voice-meter span { transform: scaleY(var(--voice-level)); }
 .voice-stage[data-state="speaking"] .voice-meter span {
   background: var(--ink);
   animation: carrier 650ms ease-in-out calc(-94ms * var(--phase)) infinite alternate;
 }
 @keyframes carrier { from { transform: scaleY(0.48); } to { transform: scaleY(0.94); } }
-.stage-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.55rem; }
 .action-mic {
-  min-height: 55px;
-  padding-inline: 1.03rem;
+  padding-inline: 0.65rem;
   background: var(--ink);
   color: var(--paper);
+  font-size: 0.87rem;
   font-weight: 720;
 }
 .action-mic:hover:not(:disabled) { background: #4f261a; }
 .action-mic[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--ink); }
 .action-mic[aria-pressed="true"]:hover:not(:disabled) { background: #fff0d7; }
 .action-mic:disabled { background: #7a3c31; color: var(--paper); }
-.stage-actions:empty { display: none; }
-.stage-hint { margin: 0.73rem 0 0; font-size: 0.85rem; text-align: center; text-wrap: balance; }
 .ticket-jump { display: none; }
 
 .conversation { padding: 1.26rem 0 0; }
@@ -352,6 +353,7 @@ a { color: inherit; text-underline-offset: 0.22em; }
 .order-table thead th { padding-block: 0.39rem; color: var(--muted); font-size: 0.71rem; font-weight: 670; }
 .order-table tbody th { font-weight: 675; overflow-wrap: anywhere; }
 .order-table td:nth-child(2) { overflow-wrap: anywhere; }
+.order-quantity-note { display: block; color: var(--muted); font-weight: 500; }
 .row-status { display: inline-flex; align-items: center; gap: 0.16rem; color: var(--muted); font-size: 0.76rem; }
 .row-editable { color: var(--saved-ink); }
 .row-shipped { color: #6b493b; }
@@ -456,6 +458,7 @@ a { color: inherit; text-underline-offset: 0.22em; }
   gap: 1rem;
 }
 .order-intro > div, .intro p, .ticket-jump span { min-width: 0; overflow-wrap: anywhere; }
+.order-tools { display: flex; flex-wrap: wrap; gap: .45rem; }
 .order-list { margin-bottom: 2rem; }
 .order-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; width: min(100%, 24rem); }
 .orders-empty { margin-top: 1rem; padding: 1rem 0; border-top: 1px dashed var(--line); }
@@ -519,7 +522,6 @@ a { color: inherit; text-underline-offset: 0.22em; }
 @media (min-width: 781px) and (max-height: 850px) {
   .intro { padding-block: 1.8rem 1.3rem; }
   .intro h1 { font-size: clamp(2.45rem, 4.6vw, 4rem); }
-  .voice-meter { height: 5.5rem; }
   .conversation { padding-top: 1rem; }
 }
 @media (max-width: 480px) {
@@ -532,14 +534,19 @@ a { color: inherit; text-underline-offset: 0.22em; }
   .intro { padding-top: 1.45rem; padding-bottom: 1rem; }
   .intro h1 { font-size: clamp(2.22rem, 9vw, 3rem); }
   .intro p { font-size: 0.93rem; }
-  .stage-actions { gap: 0.4rem; }
-  .stage-actions .action { min-height: 49px; padding-inline: 0.62rem; font-size: 0.82rem; }
   .ticket-head h2 { font-size: 0.93rem; }
   .order-intro, .order-list-head, .import-heading { flex-direction: column; align-items: stretch; gap: 0.65rem; }
   .order-intro > .action { align-self: flex-start; }
   .mapping-grid { grid-template-columns: minmax(0, 1fr); }
   .import-results li { flex-direction: column; gap: 0.12rem; }
   .import-results strong { flex-basis: auto; }
+}
+@media (max-width: 360px) {
+  .stage-state { flex-direction: column; align-items: flex-start; gap: 0.18rem; }
+  .stage-controls { gap: 0.35rem; }
+  .stage-language select, .action-mic { padding-inline: 0.45rem; }
+  .voice-meter { gap: 1px; }
+  .voice-meter span { width: 1px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }

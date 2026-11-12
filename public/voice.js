@@ -1,15 +1,22 @@
 const INPUT_RATE = 16_000;
 const PRE_ROLL_MS = 280;
-const END_OF_TURN_MS = 650;
+const SHORT_PAUSE_MS = 420;
+const LONG_PAUSE_MS = 650;
+const TRAILING_AUDIO_MS = 160;
 const MAX_TURN_MS = 14_000;
+const MAX_CACHED_REPLIES = 4;
+const MAX_CACHED_SAMPLES = 192_000;
 
-function encodeWav(chunks, sourceRate) {
-  const frames = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+function encodeWav(chunks, sourceRate, silenceMs) {
+  const trim = Math.floor(Math.max(0, silenceMs - TRAILING_AUDIO_MS) * sourceRate / 1000);
+  const frames = chunks.reduce((sum, chunk) => sum + chunk.length, 0) - trim;
   const source = new Float32Array(frames);
   let offset = 0;
   for (const chunk of chunks) {
-    source.set(chunk, offset);
-    offset += chunk.length;
+    if (offset === frames) break;
+    const part = chunk.subarray(0, frames - offset);
+    source.set(part, offset);
+    offset += part.length;
   }
   const ratio = sourceRate / INPUT_RATE;
   const length = Math.floor(frames / ratio);
@@ -62,7 +69,11 @@ function requestSignal(controller) {
   return AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
 }
 
-export function createVoice({ onUtterance, onState, onError, onLevel, onInterrupt, getSessionId }) {
+function notifyVoiceUsage() {
+  window.dispatchEvent(new Event('dispatch-voice-usage'));
+}
+
+export function createVoice({ onRecording, onUtterance, onState, onError, onLevel, onInterrupt, getSessionId }) {
   let context;
   let captureModule;
   let mic;
@@ -78,6 +89,7 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
   let preRoll = [];
   let preRollMs = 0;
   let recording;
+  const replyAudio = new Map();
 
   function updateState() {
     const next = playback ? 'speaking' : transcribing ? 'processing' : mic ? 'listening' : 'idle';
@@ -117,15 +129,21 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
     }
   }
 
-  async function sendRecording(chunks, rate) {
+  async function sendRecording(chunks, rate, silenceMs) {
     const request = new AbortController();
     transcribing = request;
     updateState();
     try {
+      const audio = encodeWav(chunks, rate, silenceMs);
+      const directTurn = onRecording?.({ audio, signal: request.signal });
+      if (directTurn !== undefined) {
+        await directTurn;
+        return;
+      }
       const response = await fetch('/api/voice/transcribe', {
         method: 'POST',
         headers: headers({ 'Content-Type': 'audio/wav', 'X-Language': inputLanguage }),
-        body: encodeWav(chunks, rate),
+        body: audio,
         signal: requestSignal(request)
       });
       if (!response.ok) throw new Error(await responseMessage(response, 'Could not transcribe that turn. Try again.'));
@@ -141,6 +159,7 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
         onError?.(error.name === 'TimeoutError' ? 'Transcription took too long. Please try again.' : error.message);
       }
     } finally {
+      notifyVoiceUsage();
       if (transcribing === request) {
         transcribing = null;
         updateState();
@@ -158,10 +177,12 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
       recording.chunks.push(samples);
       recording.duration += duration;
       recording.silence = level >= Math.max(0.009, noiseFloor * 2) ? 0 : recording.silence + duration;
-      if (recording.silence >= END_OF_TURN_MS || recording.duration >= MAX_TURN_MS) {
-        const { chunks } = recording;
+      const utteranceMs = recording.duration - recording.silence;
+      const pauseMs = utteranceMs < 1_400 ? SHORT_PAUSE_MS : LONG_PAUSE_MS;
+      if (recording.silence >= pauseMs || recording.duration >= MAX_TURN_MS) {
+        const { chunks, silence } = recording;
         resetDetection();
-        void sendRecording(chunks, rate);
+        void sendRecording(chunks, rate, silence);
       }
       return;
     }
@@ -302,7 +323,7 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
         resolve();
       };
     });
-    const start = Math.max(active.nextTime, context.currentTime + 0.045);
+    const start = Math.max(active.nextTime, context.currentTime + 0.02);
     source.start(start);
     active.nextTime = start + buffer.duration;
   }
@@ -315,6 +336,8 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
     const reader = response.body.getReader();
     let previousByte = null;
     let heardAudio = false;
+    let cached = [];
+    let frames = 0;
     try {
       while (!active.controller.signal.aborted) {
         const { done, value } = await reader.read();
@@ -334,6 +357,9 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
         const pcm = new DataView(bytes.buffer, bytes.byteOffset, count * 2);
         for (let index = 0; index < count; index++) samples[index] = pcm.getInt16(index * 2, true) / 32768;
         scheduleBuffer(active, buffer);
+        frames += count;
+        if (frames > MAX_CACHED_SAMPLES) cached = null;
+        cached?.push(buffer);
         heardAudio = true;
       }
       if (!active.controller.signal.aborted && (!heardAudio || previousByte !== null)) {
@@ -343,17 +369,29 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
       if (active.controller.signal.aborted) await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
+    return heardAudio ? cached : null;
   }
 
   async function speak(text, language) {
     if (!text || disposed) return;
     stopSpeaking();
     const active = { controller: new AbortController(), nodes: new Set(), nextTime: 0, last: null };
+    const key = JSON.stringify([language, text]);
+    let requested = false;
     playback = active;
     updateState();
     try {
       await prepare();
       if (active.controller.signal.aborted) return;
+      if (replyAudio.has(key)) {
+        const buffers = replyAudio.get(key);
+        replyAudio.delete(key);
+        replyAudio.set(key, buffers);
+        for (const buffer of buffers) scheduleBuffer(active, buffer);
+        await active.last;
+        return;
+      }
+      requested = true;
       const response = await fetch('/api/voice/speak', {
         method: 'POST',
         headers: headers({ 'Content-Type': 'application/json' }),
@@ -362,7 +400,11 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
       });
       if (!response.ok) throw new Error(await responseMessage(response, 'Could not play the reply. Try again.'));
       if (response.headers.get('Content-Type')?.startsWith('audio/pcm')) {
-        await playPcm(response, active);
+        const buffers = await playPcm(response, active);
+        if (buffers && !active.controller.signal.aborted) {
+          replyAudio.set(key, buffers);
+          if (replyAudio.size > MAX_CACHED_REPLIES) replyAudio.delete(replyAudio.keys().next().value);
+        }
       } else {
         const encoded = await response.arrayBuffer();
         if (!active.controller.signal.aborted) scheduleBuffer(active, await context.decodeAudioData(encoded));
@@ -374,6 +416,7 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
         onError?.(error.name === 'TimeoutError' ? 'Audio playback took too long. Please try again.' : error.message);
       }
     } finally {
+      if (requested) notifyVoiceUsage();
       if (playback === active) {
         playback = null;
         updateState();
@@ -385,6 +428,7 @@ export function createVoice({ onUtterance, onState, onError, onLevel, onInterrup
     disposed = true;
     stopListening();
     stopSpeaking();
+    replyAudio.clear();
     if (context && context.state !== 'closed') void context.close().catch(() => {});
   }
 
