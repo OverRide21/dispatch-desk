@@ -1,8 +1,18 @@
 # Dispatch Desk
 
-[Live sample](https://dispatch-desk-sand.vercel.app/) · [Kirana Market storefront](https://dispatch-desk-sand.vercel.app/shop) · [Your orders](https://dispatch-desk-sand.vercel.app/workspace) · [One-page solution pitch (PDF)](public/dispatch-desk-pitch.pdf)
+Voice-first order support in Hindi and Marathi. Built for **Gnani.ai’s Great Indian AI Internship**.
 
-Dispatch Desk is a browser voice and text workspace for changing wholesale orders in Hindi and Marathi. The desk uses the order’s current line items and fulfillment status. A confirmed quantity change is saved with the operator and timestamp. Shipped lines are locked.
+**[Open the live Vercel app](https://dispatch-desk-sand.vercel.app/)** · **[Read the one-page solution pitch (PDF)](public/dispatch-desk-pitch.pdf)**
+
+Phone requests can be easy to mishear. “Add three bags” and “make it three bags total” mean different things. Dispatch Desk uses Gnani.ai Prisma for transcription and Timbre for voice playback. It answers clear stock and shipment questions from order data, checks proposed edits against stock and shipment rules, and reads each change back before saving it.
+
+## Try the live project
+
+1. Open the [voice agent](https://dispatch-desk-sand.vercel.app/) and try changing the quantity on a sample order by voice or text.
+2. Browse [Kirana Market](https://dispatch-desk-sand.vercel.app/shop) and place a sample grocery order.
+3. Open [Your orders](https://dispatch-desk-sand.vercel.app/workspace) in the checkout tab to review and update that order.
+
+These public pages open without a login. The operator console handles shared orders, inventory, and imports separately. The [hosted copy of the pitch](https://dispatch-desk-sand.vercel.app/dispatch-desk-pitch.pdf) is also linked from the live homepage.
 
 ## Start locally
 
