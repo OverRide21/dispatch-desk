@@ -1,5 +1,22 @@
 'use client';
 
+const storeOrdersKey = 'dispatch-store-orders';
+
+export function readStoreOrders() {
+  try {
+    const orders = JSON.parse(sessionStorage.getItem(storeOrdersKey));
+    return Array.isArray(orders) ? orders.filter(order => typeof order?.id === 'string' && typeof order.accessKey === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoreOrder({ orderId, accessKey }) {
+  if (!accessKey) return;
+  const orders = readStoreOrders().filter(order => order.id !== orderId);
+  sessionStorage.setItem(storeOrdersKey, JSON.stringify([{ id: orderId, accessKey }, ...orders]));
+}
+
 export async function workspaceRequest(path, options = {}) {
   const timeout = AbortSignal.timeout(30_000);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;

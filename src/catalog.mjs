@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { catalogCategories, defaultCatalogCategory } from './catalog-categories.mjs';
 import { stockUnitFamily } from './order-policies.mjs';
 import { scheduleShipment } from './shipping.mjs';
@@ -187,7 +187,13 @@ export function createCatalog(db, transaction, writeOrder) {
         if (existing.fingerprint !== fingerprint) {
           throw catalogError(409, 'checkout-conflict', 'This checkout reference has already been used for another order.');
         }
-        return JSON.parse(existing.response);
+        const placed = JSON.parse(existing.response);
+        if (!placed.accessKey) {
+          placed.accessKey = randomBytes(32).toString('base64url');
+          await tx.execute(statement('UPDATE storefront_orders SET response = ? WHERE workspace_id = ? AND request_id = ?',
+            JSON.stringify(placed), workspaceId, requestId));
+        }
+        return placed;
       }
       const products = new Map((await listProducts(workspaceId, tx)).map(product => [product.sku, product]));
       const lines = items.map(({ sku, quantity }) => {
@@ -205,7 +211,7 @@ export function createCatalog(db, transaction, writeOrder) {
       if (!Number.isSafeInteger(totalPaise)) {
         throw catalogError(400, 'invalid-cart-total', 'The cart total exceeds the supported amount.');
       }
-      const response = { orderId, customer, items: responseItems, totalPaise };
+      const response = { orderId, customer, items: responseItems, totalPaise, accessKey: randomBytes(32).toString('base64url') };
       const cartSkus = new Set(items.map(item => item.sku));
       const alternates = new Set(lines.map(({ product }) => product.substituteSku).filter(sku => sku && !cartSkus.has(sku)));
       const orderLines = [...lines, ...[...alternates].map(sku => ({ product: products.get(sku), quantity: 0 }))];
@@ -220,7 +226,15 @@ export function createCatalog(db, transaction, writeOrder) {
     });
   }
 
-  return { listProducts, saveProduct, addStock, placeShopOrder };
+  async function canAccessShopOrder(workspaceId, orderId, accessKey) {
+    if (typeof orderId !== 'string' || !/^SHOP-[A-F0-9]{16}$/u.test(orderId) ||
+      typeof accessKey !== 'string' || !/^[\w-]{43}$/u.test(accessKey)) return false;
+    const { rows } = await db.execute(statement(`SELECT 1 FROM storefront_orders
+      WHERE workspace_id = ? AND order_id = ? AND json_extract(response, '$.accessKey') = ?`, workspaceId, orderId, accessKey));
+    return rows.length > 0;
+  }
+
+  return { listProducts, saveProduct, addStock, placeShopOrder, canAccessShopOrder };
 }
 
 export async function adjustStock(client, workspaceId, sku, delta) {

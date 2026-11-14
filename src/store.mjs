@@ -631,7 +631,8 @@ export async function createStore(path = process.env.DISPATCH_DB_PATH || '.dispa
 
   async function createCall(actor, state) {
     const now = Date.now();
-    const call = { id: (actor.role === 'guest' ? 'guest-' : '') + randomUUID(), owner: actor.sessionId, workspaceId: actor.workspaceId, state, revision: 0 };
+    const prefix = ['guest', 'shopper'].includes(actor.role) ? `${actor.role}-` : '';
+    const call = { id: prefix + randomUUID(), owner: actor.sessionId, workspaceId: actor.workspaceId, state, revision: 0 };
     await db.batch([
       statement('DELETE FROM call_sessions WHERE expires_at <= ?', now),
       statement('INSERT INTO call_sessions (id, owner, workspace_id, state, revision, expires_at) VALUES (?, ?, ?, ?, ?, ?)',

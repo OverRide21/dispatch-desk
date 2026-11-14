@@ -1,6 +1,6 @@
 # Dispatch Desk
 
-[Live sample](https://dispatch-desk-sand.vercel.app/) · [Kirana Market storefront](https://dispatch-desk-sand.vercel.app/shop) · [Operator workspace](https://dispatch-desk-sand.vercel.app/workspace) · [One-page solution pitch (PDF)](public/dispatch-desk-pitch.pdf)
+[Live sample](https://dispatch-desk-sand.vercel.app/) · [Kirana Market storefront](https://dispatch-desk-sand.vercel.app/shop) · [Your orders](https://dispatch-desk-sand.vercel.app/workspace) · [One-page solution pitch (PDF)](public/dispatch-desk-pitch.pdf)
 
 Dispatch Desk is a browser voice and text workspace for changing wholesale orders in Hindi and Marathi. The desk uses the order’s current line items and fulfillment status. A confirmed quantity change is saved with the operator and timestamp. Shipped lines are locked.
 
@@ -13,7 +13,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-Open [Dispatch Desk](http://127.0.0.1:3000) to try a private copy of a sample order without signing in. Open [Workspace](http://127.0.0.1:3000/workspace) to access shared orders, imports, and administration. For a production-mode run, use `npm.cmd run build` followed by `npm.cmd start`. Set `GNANI_API_KEY` to enable microphone calls with Prisma transcription and Timbre playback. Allow microphone access in your browser. Remote browser microphone access requires HTTPS. [Gnani API quickstart](https://docs.gnani.ai/api/introduction/quick-start)
+Open [Dispatch Desk](http://127.0.0.1:3000) to try a private copy of a sample order without signing in. The [customer workspace](http://127.0.0.1:3000/workspace) opens store orders in the tab used for checkout. The [operator console](http://127.0.0.1:3000/operator) provides restricted access to shared orders, imports, and administration. For a production-mode run, use `npm.cmd run build` followed by `npm.cmd start`. Set `GNANI_API_KEY` to enable microphone calls with Prisma transcription and Timbre playback. Allow microphone access in your browser. Remote browser microphone access requires HTTPS. [Gnani API quickstart](https://docs.gnani.ai/api/introduction/quick-start)
 
 To try product-name hints in speech recognition, set `DISPATCH_STT_PROVIDER=sarvam` and `SARVAM_API_KEY` on the server, then restart. The app sends microphone audio and up to 50 product names, translations, aliases, and SKUs from the open order to Saaras v4. It passes the selected conversation language and uses code-mixed transcription to retain English product names. Gnani still handles speech playback. The default `DISPATCH_STT_PROVIDER=gnani` uses Gnani for both stages. Keyterms improve recognition of domain vocabulary. Any reduction in repeat turns depends on the audio and should be measured. [Sarvam keyterm prompting](https://docs.sarvam.ai/api/api-guides-tutorials/speech-to-text/how-to/keyterms)
 

@@ -5,6 +5,7 @@ import DispatchWorkspace from './dispatch-workspace.jsx';
 import { editLockReason } from '../../src/order-policies.mjs';
 import { ReceiptHistory, ShipmentTimeline, StockOptions } from './order-extras.jsx';
 import { prompts, useDispatch } from './use-dispatch.js';
+import { readStoreOrders } from './workspace-api.js';
 import VoiceUsage from './voice-usage.jsx';
 
 const glyphs = {
@@ -361,8 +362,8 @@ function OrderTicket({ model, desk, onUnauthorized, guest }) {
   );
 }
 
-function OrderCall({ orderId, onUnauthorized, onBack, guest = false }) {
-  const { model, meter, desk } = useDispatch(orderId, onUnauthorized, guest);
+function OrderCall({ orderId, onUnauthorized, onBack, guest = false, accessKey }) {
+  const { model, meter, desk } = useDispatch(orderId, onUnauthorized, guest, accessKey);
   const { pending, stockOffer, receipt, history } = model.session ?? {};
   const recentChange = pending ?? history?.[0];
   const changeCount = pending?.updates?.length ?? receipt?.changes.length ?? 0;
@@ -388,9 +389,9 @@ function OrderCall({ orderId, onUnauthorized, onBack, guest = false }) {
               <Icon name="arrow" size={18} />
             </a>}
             <Conversation model={model} desk={desk} />
-            {model.session?.voiceEnabled && !guest && <VoiceUsage sessionId={model.session.sessionId} onUnauthorized={onUnauthorized} />}
+            {model.session?.voiceEnabled && !guest && !accessKey && <VoiceUsage sessionId={model.session.sessionId} onUnauthorized={onUnauthorized} />}
           </div>
-          <OrderTicket model={model} desk={desk} onUnauthorized={onUnauthorized} guest={guest} />
+          <OrderTicket model={model} desk={desk} onUnauthorized={onUnauthorized} guest={guest || Boolean(accessKey)} />
         </div>
       </main>
       <footer className="site-footer"><Icon name="lock" size={16} /> Packed items, shipped items, and items past their cutoff are locked. Edits are applied after you confirm them.</footer>
@@ -398,8 +399,29 @@ function OrderCall({ orderId, onUnauthorized, onBack, guest = false }) {
   );
 }
 
-export default function CallDesk({ workspace = false }) {
-  if (workspace) return <DispatchWorkspace OrderCall={OrderCall} />;
+function StoreWorkspace() {
+  const [view, setView] = useState(null);
+  useEffect(() => {
+    const orders = readStoreOrders();
+    const reference = new URLSearchParams(window.location.search).get('orderId');
+    setView({ orders, current: orders.find(order => order.id === reference), unavailable: Boolean(reference) && !orders.some(order => order.id === reference) });
+  }, []);
+  if (view?.current) return <OrderCall orderId={view.current.id} accessKey={view.current.accessKey}
+    onBack={() => window.location.assign('/workspace')} />;
+  return <main className="intro" id="main">
+    <h1>Your orders</h1>
+    {view === null ? <p role="status">Loading your orders…</p> : <>
+      {view.unavailable && <p role="status">Open the order in the browser tab used for checkout.</p>}
+      {view.orders.length ? <ul>{view.orders.map(order => <li key={order.id}>
+        <a href={'/workspace?orderId=' + encodeURIComponent(order.id)}>{order.id}</a>
+      </li>)}</ul> : <p>Orders you place from this browser tab will appear here.</p>}
+      <a className="action action-primary" href="/shop">Open storefront</a>
+    </>}
+  </main>;
+}
+
+export default function CallDesk({ workspace = false, operator = false }) {
+  if (operator) return <DispatchWorkspace OrderCall={OrderCall} />;
   return <div className="dispatch">
     <a className="skip-link" href="#main">Skip to main content</a>
     <header className="site-header">
@@ -407,9 +429,9 @@ export default function CallDesk({ workspace = false }) {
       <nav className="header-actions public-navigation" aria-label="Project pages">
         <a className="action action-secondary" href="/shop">Storefront</a>
         <a className="action action-secondary" href="/dispatch-desk-pitch.pdf">Solution pitch</a>
-        <a className="action action-secondary" href="/workspace">Workspace</a>
+        <a className="action action-secondary" href="/workspace">Your orders</a>
       </nav>
     </header>
-    <OrderCall guest />
+    {workspace ? <StoreWorkspace /> : <OrderCall guest />}
   </div>;
 }

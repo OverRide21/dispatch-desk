@@ -44,16 +44,27 @@ test('stock received by an admin is shared by storefront checkout and an open di
   assert.equal(first.status, 201);
   const order = await first.json();
   assert.deepEqual(await (await checkout(8, 'checkout-test-first')).json(), order);
+  const publicHandlers = createDispatchHandlers({ store, identify: () => null });
+  const openAsCustomer = (storeOrderId, accessKey) => publicHandlers.guestSession(request('/api/session', 'POST', {
+    storeOrderId, accessKey, language: 'en-IN',
+  }));
+  assert.equal((await openAsCustomer(order.orderId, 'x'.repeat(43))).status, 404);
+  const customerCall = await openAsCustomer(order.orderId, order.accessKey).then(response => response.json());
+  assert.equal(customerCall.order.id, order.orderId);
+  assert.equal((await publicHandlers.orders(request('/api/orders', 'GET', undefined, {
+    'X-Session-Id': customerCall.sessionId,
+  }))).status, 401);
   const orders = await handlers.orders(request('/api/orders')).then(response => response.json());
   assert.equal(orders.orders[0].id, order.orderId);
   assert.equal(orders.orders[0].source, 'storefront');
-  let call = await handlers.session(request('/api/session?' + new URLSearchParams({ orderId: order.orderId, language: 'en-IN' })))
-    .then(response => response.json());
+  let call = customerCall;
   assert.equal(call.order.items.find(item => item.sku === 'RICE').availableQuantity, 12);
-  assert.equal((await checkout(3, 'checkout-test-second')).status, 201);
+  const second = await checkout(3, 'checkout-test-second');
+  assert.equal(second.status, 201);
+  assert.equal((await openAsCustomer((await second.json()).orderId, order.accessKey)).status, 404);
 
   async function turn(text, stockAction) {
-    const response = await handlers.turn(request('/api/turn', 'POST', { text, language: 'en-IN', replyProvider: 'rules', stockAction }, {
+    const response = await publicHandlers.turn(request('/api/turn', 'POST', { text, language: 'en-IN', replyProvider: 'rules', stockAction }, {
       'X-Session-Id': call.sessionId, 'X-Session-Revision': String(call.revision),
     }));
     assert.equal(response.status, 200);

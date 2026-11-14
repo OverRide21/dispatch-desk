@@ -40,7 +40,7 @@ export function savePreference(key, value) {
   try { window.sessionStorage.setItem(key, value); } catch { /* Storage can be disabled. */ }
 }
 
-function createDesk(render, meter, orderId, onUnauthorized, guest) {
+function createDesk(render, meter, orderId, onUnauthorized, guest, accessKey) {
   let model = initial;
   let sessionId;
   let voice;
@@ -309,7 +309,9 @@ function createDesk(render, meter, orderId, onUnauthorized, guest) {
     endVoice('');
     update({ busy: true, error: null });
     try {
-      const session = guest ? await request('/api/session', { language: model.language }) : await request('/api/session?' + new URLSearchParams({
+      const session = guest || accessKey ? await request('/api/session', { language: model.language,
+        ...(accessKey ? { storeOrderId: orderId, accessKey } : {}),
+      }) : await request('/api/session?' + new URLSearchParams({
         orderId, language: model.language,
       }));
       applySnapshot(session);
@@ -381,12 +383,12 @@ function createDesk(render, meter, orderId, onUnauthorized, guest) {
   };
 }
 
-export function useDispatch(orderId, onUnauthorized, guest = false) {
+export function useDispatch(orderId, onUnauthorized, guest = false, accessKey) {
   const [model, setModel] = useState(initial);
   const meter = useRef(null);
   const desk = useRef(null);
   useEffect(() => {
-    const controller = createDesk(setModel, meter, orderId, onUnauthorized, guest);
+    const controller = createDesk(setModel, meter, orderId, onUnauthorized, guest, accessKey);
     desk.current = controller;
     const storedLanguage = readPreference('dispatch-desk-language');
     if (storedLanguage) controller.setLanguage(storedLanguage);
@@ -401,6 +403,6 @@ export function useDispatch(orderId, onUnauthorized, guest = false) {
       controller.dispose();
       desk.current = null;
     };
-  }, [orderId, onUnauthorized, guest]);
+  }, [orderId, onUnauthorized, guest, accessKey]);
   return { model, meter, desk };
 }

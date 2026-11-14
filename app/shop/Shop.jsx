@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import { catalogCategories, defaultCatalogCategory } from '../../src/catalog-categories.mjs';
-import { jsonRequest, workspaceRequest } from '../components/workspace-api.js';
+import { jsonRequest, saveStoreOrder, workspaceRequest } from '../components/workspace-api.js';
 import styles from './shop.module.css';
 
 const cartKey = 'dispatch-shop-cart';
@@ -216,6 +216,7 @@ export default function Shop() {
       setRetryPending(true);
       const placed = await workspaceRequest('/api/shop', jsonRequest('POST', { ...payload, requestId: pending.current.id }));
       if (typeof placed.orderId !== 'string' || !placed.orderId) throw new Error('Missing order reference');
+      try { saveStoreOrder(placed); } catch { /* Checkout can still display the order reference. */ }
       writeStorage(orderKey, placed.orderId);
       writeStorage(cartKey, []);
       clearPending();
@@ -269,7 +270,7 @@ export default function Shop() {
           <section className={styles.success} aria-labelledby="shop-success">
             <h2 id="shop-success" ref={successHeading} tabIndex={-1}>Order placed</h2>
             <p className={styles.reference}>{orderId}</p>
-            <p>Use this reference to review the order with Dispatch Desk.</p>
+            <p>Open this order in Dispatch Desk from the same browser tab.</p>
             <div className={styles.successActions}>
               <Link className="action action-primary" href={`/workspace?orderId=${encodeURIComponent(orderId)}`}>Open in Dispatch Desk</Link>
               <button type="button" className="action action-secondary" onClick={copyReference}>Copy reference</button>

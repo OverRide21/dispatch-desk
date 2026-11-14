@@ -13,6 +13,8 @@ import { wavDurationMilliseconds } from './voice-usage.mjs';
 const locales = new Set(['mr-IN', 'hi-IN', 'en-IN']);
 const uploadLimit = (process.env.VERCEL ? 4 : 5) * 1024 * 1024;
 const guest = { workspaceId: 'public-sample', user: 'Guest', sessionId: 'public-sample', role: 'guest' };
+const shopper = () => ({ workspaceId: process.env.DISPATCH_WORKSPACE_ID?.trim() || 'default',
+  user: 'Store customer', sessionId: 'store-customer', role: 'shopper' });
 const guestOrder = {
   id: 'SAMPLE-1048', customer: 'Sample order', revision: 0,
   items: [
@@ -115,7 +117,7 @@ async function styleOrderReply({ provider, ...input }) {
 }
 
 function sessionData(session) {
-  const providers = replyProviders(session.owner === guest.sessionId);
+  const providers = replyProviders(/^(?:guest|shopper)-/u.test(session.id));
   const sarvamSpeech = process.env.DISPATCH_STT_PROVIDER === 'sarvam';
   return {
     sessionId: session.id,
@@ -275,7 +277,8 @@ export function createDispatchHandlers({
       if (request.method !== 'GET') assertSameOrigin(request);
       db = await database();
       const id = request.headers.get('x-session-id');
-      const actor = guestAllowed && id?.startsWith('guest-') ? guest : await identify(request, db);
+      const actor = guestAllowed && id?.startsWith('guest-') ? guest
+        : guestAllowed && id?.startsWith('shopper-') ? shopper() : await identify(request, db);
       if (!actor) throw new RequestError(401, 'Sign in to continue.', 'sign-in-required');
       if (admin && actor.role !== 'admin') throw new RequestError(403, 'Only administrators can import orders.');
       if (sessionRequired) {
@@ -298,9 +301,10 @@ export function createDispatchHandlers({
       if (session?.lock) await db.unlockCall(session).catch(() => {});
     }
   };
-  const requestLimitKey = (actor, session) => actor === guest ? session.id : actor.sessionId;
+  const publicActor = actor => actor === guest || actor.role === 'shopper';
+  const requestLimitKey = (actor, session) => publicActor(actor) ? session.id : actor.sessionId;
   const reserveGuestRequests = async (db, actor, kind) => {
-    if (actor !== guest) return;
+    if (!publicActor(actor)) return;
     if (!await db.rateLimit('public-sample:' + kind, 60, 60_000)) {
       throw new RequestError(429, 'The public sample is busy. Please try again in a minute.');
     }
@@ -325,9 +329,21 @@ export function createDispatchHandlers({
     async guestSession(request) {
       try {
         assertSameOrigin(request);
-        const { language } = await readJson(request) ?? {};
+        const { language, storeOrderId, accessKey } = await readJson(request) ?? {};
         if (language !== undefined && !locales.has(language)) throw new RequestError(400, 'Choose Hindi, Marathi, or English.');
         const db = await database();
+        if (storeOrderId !== undefined || accessKey !== undefined) {
+          const actor = shopper();
+          await reserveGuestRequests(db, actor, 'order-access');
+          if (!await db.canAccessShopOrder(actor.workspaceId, storeOrderId, accessKey)) {
+            throw new RequestError(404, 'This order is unavailable. Open it in the browser tab used for checkout.', 'shop-order-unavailable');
+          }
+          const order = await requireOrder(db, actor.workspaceId, storeOrderId);
+          if (order.source !== 'storefront') throw new RequestError(404, 'This store order is unavailable.');
+          const previous = await db.getCall(request.headers.get('x-session-id'), actor);
+          if (previous?.state.order.id === order.id && previous.state.order.revision === order.revision) return json(sessionData(previous));
+          return json(sessionData(await db.createCall(actor, createSession(order, language))));
+        }
         const previous = await db.getCall(request.headers.get('x-session-id'), guest);
         if (previous) return json(sessionData(previous));
         await reserveGuestRequests(db, guest, 'new-calls');
@@ -468,11 +484,11 @@ export function createDispatchHandlers({
       ]);
       const revision = new URL(request.url).searchParams.get('revision');
       return json({ holdUntil, ...(String(order.revision) !== revision ? { order } : {}) });
-    }, { sessionRequired: true, operation: 'order.shipping' }),
+    }, { sessionRequired: true, guestAllowed: true, operation: 'order.shipping' }),
     turn: protectedRoute(async (request, { db, actor, session }) => {
       assertRevision(session, request);
       const audio = request.headers.get('content-type')?.split(';')[0].trim() === 'audio/wav';
-      const providers = replyProviders(actor === guest);
+      const providers = replyProviders(publicActor(actor));
       const audioProvider = audio ? request.headers.get('x-reply-provider') ?? 'rules' : null;
       if (audio && (!['rules', 'auto'].includes(audioProvider) || !providers.includes(audioProvider))) {
         discardBody(request);
