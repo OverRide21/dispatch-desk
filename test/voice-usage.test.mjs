@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDispatchHandlers } from '../src/http.mjs';
+import { transcriptionKeyterms } from '../src/orders.mjs';
 import { openLocalSqlite } from '../src/sqlite.mjs';
 import { createVoiceUsage, setupVoiceUsage, wavDurationMilliseconds } from '../src/voice-usage.mjs';
 import { actor, fixtureStore, orderId } from './order-fixture.mjs';
@@ -22,6 +23,56 @@ function pcmWav(samples) {
   result.writeUInt32LE(bytes, 40);
   return result;
 }
+
+test('Saaras keyterms prioritize active product names and respect the provider limits', () => {
+  const items = [
+    { name: 'Rice', nameMr: 'तांदूळ', aliases: [' RICE ', 'x'.repeat(65), 'Blue   Bag'], quantity: 1 },
+    { name: 'Sugar', nameMr: 'साखर', status: 'shipped', quantity: 0 },
+    { name: 'Removed product', quantity: 0 },
+  ];
+  const terms = transcriptionKeyterms(items, 'mr-IN');
+  assert.deepEqual(terms.slice(0, 2), ['तांदूळ', 'साखर']);
+  assert.ok(terms.includes('Blue Bag'));
+  assert.equal(terms.filter(term => term.toLowerCase() === 'rice').length, 1);
+  assert.ok(terms.every(term => term !== 'Removed product' && [...term].length <= 64));
+  assert.equal(transcriptionKeyterms(Array.from({ length: 60 }, (_, i) => ({ name: `Product ${i}`, quantity: 1 }))).length, 50);
+});
+
+test('optional Saaras transcription sends current order keyterms through both voice entry points', async t => {
+  for (const [key, value] of Object.entries({ DISPATCH_STT_PROVIDER: 'sarvam', SARVAM_API_KEY: 'test-key', GNANI_API_KEY: 'test-gnani' })) {
+    const previous = process.env[key];
+    process.env[key] = value;
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  const languages = [];
+  t.mock.method(globalThis, 'fetch', async (url, request) => {
+    assert.equal(url, 'https://api.sarvam.ai/speech-to-text');
+    assert.equal(request.headers['api-subscription-key'], 'test-key');
+    assert.equal(request.body.get('model'), 'saaras:v4');
+    assert.equal(request.body.get('mode'), 'codemix');
+    assert.equal(request.body.get('file').type, 'audio/wav');
+    const terms = JSON.parse(request.body.get('keyterms'));
+    assert.ok(terms.includes('Rice') && terms.includes('तांदूळ') && terms.includes('चावल'));
+    assert.ok(!terms.includes(orderId));
+    languages.push(request.body.get('language_code'));
+    return Response.json({ transcript: 'तांदूळ दहा करा', language_code: 'mr-IN' });
+  });
+  const store = await fixtureStore(t);
+  const handlers = createDispatchHandlers({ store, identify: () => actor });
+  const base = 'http://dispatch.test';
+  const session = await handlers.session(new Request(base + '/api/session?orderId=' + orderId)).then(r => r.json());
+  assert.equal(session.voiceEnabled, true);
+  const request = (path, language) => new Request(base + path, {
+    method: 'POST', body: pcmWav(1600), headers: { 'Content-Type': 'audio/wav', 'X-Language': language,
+      'X-Session-Id': session.sessionId, 'X-Session-Revision': session.revision },
+  });
+  const standalone = await handlers.transcribe(request('/api/voice/transcribe', 'indic-auto'));
+  assert.deepEqual(await standalone.json(), { text: 'तांदूळ दहा करा', language: 'mr-IN' });
+  const turn = await handlers.turn(request('/api/turn', 'mr-IN'));
+  assert.equal(turn.status, 200);
+  assert.equal((await turn.json()).pending.to, 10);
+  assert.deepEqual(languages, ['unknown', 'mr-IN']);
+});
 
 test('WAV usage comes from validated PCM sample data and rounds up to milliseconds', () => {
   const wav = pcmWav(20_001);

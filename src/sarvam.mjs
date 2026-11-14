@@ -1,7 +1,36 @@
 const endpoint = 'https://api.sarvam.ai/v1/chat/completions';
+const speechEndpoint = 'https://api.sarvam.ai/speech-to-text';
+const speechLanguages = new Set(['en-IN', 'hi-IN', 'mr-IN']);
 
 export function sarvamEnabled() {
   return Boolean(process.env.SARVAM_API_KEY?.trim());
+}
+
+export async function transcribeWithSarvam(audio, { language, keyterms, signal } = {}) {
+  const key = process.env.SARVAM_API_KEY?.trim();
+  const requested = speechLanguages.has(language) ? language : 'unknown';
+  const form = new FormData();
+  form.set('file', new Blob([audio], { type: 'audio/wav' }), 'utterance.wav');
+  form.set('model', 'saaras:v4');
+  form.set('mode', 'codemix');
+  form.set('language_code', requested);
+  if (keyterms?.length) form.set('keyterms', JSON.stringify(keyterms));
+
+  const response = await fetch(speechEndpoint, {
+    method: 'POST', headers: { 'api-subscription-key': key }, body: form, redirect: 'error', signal,
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    const status = [401, 402, 403, 503].includes(response.status) ? 503 : response.status === 429 ? 429 : 502;
+    throw Object.assign(new Error('Sarvam transcription failed.'), { status });
+  }
+  const data = await response.json();
+  if (typeof data?.transcript !== 'string') throw new Error('Sarvam returned an unreadable transcript.');
+  const detected = data.language_code === 'en-US' ? 'en-IN' : data.language_code;
+  return {
+    text: data.transcript.trim(),
+    language: speechLanguages.has(requested) ? requested : speechLanguages.has(detected) ? detected : 'hi-IN',
+  };
 }
 
 export async function interpretWithSarvam(messages, schema, signal) {

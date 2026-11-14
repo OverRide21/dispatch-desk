@@ -183,6 +183,24 @@ function itemNames(item) {
   return [item.name, shortName, item.sku, item.nameHi, item.nameMr, ...(item.aliases ?? []), ...(languageInfo(item)?.aliases ?? [])];
 }
 
+export function transcriptionKeyterms(items, language) {
+  const active = items.filter(item => item.quantity > 0 || fulfillmentStage(item) === 'shipped');
+  const locale = localeKeys[language];
+  const primary = active.map(item => productName(item, locale));
+  const alternatives = active.flatMap(item => [item.name.replace(packSize, ''), productName(item, 'hi'), productName(item, 'mr'),
+    ...(item.aliases ?? []), item.sku]);
+  const terms = new Map();
+  for (const value of [...primary, ...alternatives]) {
+    if (typeof value !== 'string') continue;
+    const term = value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+    if (!term || [...term].length > 64) continue;
+    const canonical = term.toLowerCase();
+    if (!terms.has(canonical)) terms.set(canonical, term);
+    if (terms.size === 50) break;
+  }
+  return [...terms.values()];
+}
+
 export function interpretationItemNames(item, text) {
   const request = normalize(text);
   const names = itemNames(item).filter(name => typeof name === 'string' && request.includes(normalize(name)));

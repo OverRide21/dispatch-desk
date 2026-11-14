@@ -13,6 +13,8 @@ npm.cmd run dev
 
 Open [Dispatch Desk](http://127.0.0.1:3000) and sign in. For a production-mode run, use `npm.cmd run build` followed by `npm.cmd start`. Set `GNANI_API_KEY` to enable microphone calls with Prisma transcription and Timbre playback. Allow microphone access in your browser. Remote browser microphone access requires HTTPS. [Gnani API quickstart](https://docs.gnani.ai/api/introduction/quick-start)
 
+To try product-name hints in speech recognition, set `DISPATCH_STT_PROVIDER=sarvam` and `SARVAM_API_KEY` on the server, then restart. The app sends microphone audio and up to 50 product names, translations, aliases, and SKUs from the open order to Saaras v4. It passes the selected conversation language and uses code-mixed transcription to retain English product names. Gnani still handles speech playback. The default `DISPATCH_STT_PROVIDER=gnani` uses Gnani for both stages. Keyterms improve recognition of domain vocabulary. Any reduction in repeat turns depends on the audio and should be measured. [Sarvam keyterm prompting](https://docs.sarvam.ai/api/api-guides-tutorials/speech-to-text/how-to/keyterms)
+
 For a local walkthrough, set `DISPATCH_LOCAL_ACCESS=1` in `.env.local` and restart. On the loopback address, Dispatch Desk opens as **Local operator** and records confirmed edits under that name. Hosted workspaces use administrator and operator sign-in.
 
 Choose Marathi, Hindi, or English using the language selector on the order screen. The desk uses that language to listen and reply until you select another one. You can change the language during a call from the same selector.

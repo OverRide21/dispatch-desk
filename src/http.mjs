@@ -1,9 +1,9 @@
-import { createSession, handleTurn, routeOrderLookup, shouldInterpretTurn, snapshot } from './orders.mjs';
+import { createSession, handleTurn, routeOrderLookup, shouldInterpretTurn, snapshot, transcriptionKeyterms } from './orders.mjs';
 import { interpretOrderTurn } from './order-interpretation.mjs';
 import { synthesize, transcribe, voiceAvailable } from './gnani.mjs';
 import { ollamaEnabled, personalizeReply, warmOllama } from './ollama.mjs';
 import { groqEnabled, selectGroqReply } from './groq.mjs';
-import { sarvamEnabled } from './sarvam.mjs';
+import { sarvamEnabled, transcribeWithSarvam } from './sarvam.mjs';
 import { authenticate, authConfigured, authLogin, authLogout, assertSameOrigin, localAccessEnabled } from './auth.mjs';
 import { getStore } from './store.mjs';
 import { inspectOrderImport, parseOrderImport, orderTemplate } from './order-import.mjs';
@@ -107,11 +107,12 @@ async function styleOrderReply({ provider, ...input }) {
 
 function sessionData(session) {
   const providers = replyProviders();
+  const sarvamSpeech = process.env.DISPATCH_STT_PROVIDER === 'sarvam';
   return {
     sessionId: session.id,
     revision: session.revision,
-    voiceEnabled: voiceAvailable(),
-    voiceAutoLanguage: process.env.GNANI_STT_MODEL !== 'prisma-v2.5',
+    voiceEnabled: voiceAvailable() && (!sarvamSpeech || sarvamEnabled()),
+    voiceAutoLanguage: sarvamSpeech || process.env.GNANI_STT_MODEL !== 'prisma-v2.5',
     ollamaEnabled: ollamaEnabled(),
     replyProviders: providers,
     defaultReplyProvider: providers.includes('auto') ? 'auto' : 'rules',
@@ -139,9 +140,10 @@ function requestError(error) {
 }
 
 async function voiceRoute(request, action, { db, actor, session }) {
-  if (!voiceAvailable()) {
+  const sarvamSpeech = action === 'transcribe' && process.env.DISPATCH_STT_PROVIDER === 'sarvam';
+  if (sarvamSpeech ? !sarvamEnabled() : !voiceAvailable()) {
     discardBody(request);
-    throw new RequestError(503, 'Live voice needs a Gnani API key. You can still type to the desk.');
+    throw new RequestError(503, `Live voice needs a ${sarvamSpeech ? 'Sarvam' : 'Gnani'} API key. You can still type to the desk.`);
   }
   const cancellation = new AbortController();
   const timeout = AbortSignal.timeout(25_000);
@@ -157,6 +159,10 @@ async function voiceRoute(request, action, { db, actor, session }) {
       const transcriptionMilliseconds = wavDurationMilliseconds(input);
       signal.throwIfAborted();
       await db.voiceUsage.reserve(actor.workspaceId, session.id, { transcriptionMilliseconds });
+      if (sarvamSpeech) {
+        const keyterms = transcriptionKeyterms(session.state.order.items, language);
+        return await transcribeWithSarvam(input, { language, keyterms, signal });
+      }
       return await transcribe(input, { language, signal });
     }
 
@@ -206,12 +212,13 @@ async function voiceRoute(request, action, { db, actor, session }) {
     if (timeout.aborted || error?.status === 504) {
       throw new RequestError(504, 'The voice service took too long. Please try again or type your message.');
     }
+    const provider = sarvamSpeech ? 'Sarvam' : 'Gnani';
     const failures = {
-      429: 'Gnani voice is busy. Wait a moment, or type your message.',
-      503: 'Gnani rejected the configured key or model. Check your access, or use text.',
+      429: `${provider} voice is busy. Wait a moment, or type your message.`,
+      503: `${provider} voice is unavailable. Check your key, credits, and model access, or use text.`,
     };
     const status = Object.hasOwn(failures, error?.status) ? error.status : 502;
-    throw new RequestError(status, failures[status] || 'The voice service could not finish this turn. Check the Gnani key and credits, or use text.');
+    throw new RequestError(status, failures[status] || `The voice service could not finish this turn. Check the ${provider} key and credits, or use text.`);
   }
 }
 
