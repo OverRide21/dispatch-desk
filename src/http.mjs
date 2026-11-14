@@ -12,6 +12,15 @@ import { wavDurationMilliseconds } from './voice-usage.mjs';
 
 const locales = new Set(['mr-IN', 'hi-IN', 'en-IN']);
 const uploadLimit = (process.env.VERCEL ? 4 : 5) * 1024 * 1024;
+const guest = { workspaceId: 'public-sample', user: 'Guest', sessionId: 'public-sample', role: 'guest' };
+const guestOrder = {
+  id: 'SAMPLE-1048', customer: 'Sample order', revision: 0,
+  items: [
+    { id: 'rice', name: 'Rice', sku: 'RICE', unit: 'bags', quantity: 24, status: 'pending', limit: 50 },
+    { id: 'sugar', name: 'Sugar', sku: 'SUGAR', unit: 'bags', quantity: 8, status: 'shipped' },
+    { id: 'oil', name: 'Cooking oil', sku: 'OIL', unit: 'cases', quantity: 6, status: 'pending', limit: 20 },
+  ],
+};
 const responseHeaders = {
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
@@ -86,13 +95,13 @@ function readText(body, limit = 500) {
   return { text, language: body.language };
 }
 
-function replyProviders() {
+function replyProviders(guestCall = false) {
   const groq = groqEnabled();
   return [
     'rules',
     ...(sarvamEnabled() || groq ? ['auto'] : []),
-    ...(groq ? ['groq'] : []),
-    ...['ollama', 'ollama-hari'].filter(ollamaEnabled),
+    ...(!guestCall && groq ? ['groq'] : []),
+    ...(!guestCall ? ['ollama', 'ollama-hari'].filter(ollamaEnabled) : []),
   ];
 }
 
@@ -106,7 +115,7 @@ async function styleOrderReply({ provider, ...input }) {
 }
 
 function sessionData(session) {
-  const providers = replyProviders();
+  const providers = replyProviders(session.owner === guest.sessionId);
   const sarvamSpeech = process.env.DISPATCH_STT_PROVIDER === 'sarvam';
   return {
     sessionId: session.id,
@@ -259,17 +268,17 @@ export function createDispatchHandlers({
   styleReply = styleOrderReply, warmReplyModel = warmOllama, interpret = interpretOrderTurn,
 } = {}) {
   const database = () => store ?? getStore();
-  const protectedRoute = (action, { sessionRequired = false, lock = false, admin = false, operation } = {}) => async (request) => {
+  const protectedRoute = (action, { sessionRequired = false, guestAllowed = false, lock = false, admin = false, operation } = {}) => async (request) => {
     let db;
     let session;
     try {
       if (request.method !== 'GET') assertSameOrigin(request);
       db = await database();
-      const actor = await identify(request, db);
+      const id = request.headers.get('x-session-id');
+      const actor = guestAllowed && id?.startsWith('guest-') ? guest : await identify(request, db);
       if (!actor) throw new RequestError(401, 'Sign in to continue.', 'sign-in-required');
       if (admin && actor.role !== 'admin') throw new RequestError(403, 'Only administrators can import orders.');
       if (sessionRequired) {
-        const id = request.headers.get('x-session-id');
         session = lock ? await db.lockCall(id, actor) : await db.getCall(id, actor);
         if (!session) {
           if (lock && await db.getCall(id, actor)) {
@@ -289,19 +298,44 @@ export function createDispatchHandlers({
       if (session?.lock) await db.unlockCall(session).catch(() => {});
     }
   };
+  const requestLimitKey = (actor, session) => actor === guest ? session.id : actor.sessionId;
+  const reserveGuestRequests = async (db, actor, kind) => {
+    if (actor !== guest) return;
+    if (!await db.rateLimit('public-sample:' + kind, 60, 60_000)) {
+      throw new RequestError(429, 'The public sample is busy. Please try again in a minute.');
+    }
+    if (kind !== 'new-calls' && !await db.rateLimit('public-sample:daily:' + kind, 600, 86_400_000)) {
+      throw new RequestError(429, 'The public sample reached its daily AI usage limit. Try Fast mode or return later.');
+    }
+  };
   const speechRoute = (action) => protectedRoute(async (request, { db, actor, session }) => {
-    if (!await db.rateLimit('voice:' + actor.sessionId, 40, 60_000)) {
+    if (!await db.rateLimit('voice:' + requestLimitKey(actor, session), 40, 60_000)) {
       throw new RequestError(429, 'Voice request limit reached. Wait a moment or continue by text.');
     }
+    await reserveGuestRequests(db, actor, 'voice');
     const result = await voiceRoute(request, action, { db, actor, session });
     return action === 'transcribe' ? json(result) : result;
-  }, { sessionRequired: true, operation: `voice.${action}` });
+  }, { sessionRequired: true, guestAllowed: true, operation: `voice.${action}` });
   const manageCatalog = action => protectedRoute(async (request, context) => {
     if (context.actor.role !== 'admin') throw new RequestError(403, 'Only administrators can manage stock.');
     return action(request, context);
   }, { operation: 'catalog.manage' });
 
   return {
+    async guestSession(request) {
+      try {
+        assertSameOrigin(request);
+        const { language } = await readJson(request) ?? {};
+        if (language !== undefined && !locales.has(language)) throw new RequestError(400, 'Choose Hindi, Marathi, or English.');
+        const db = await database();
+        const previous = await db.getCall(request.headers.get('x-session-id'), guest);
+        if (previous) return json(sessionData(previous));
+        await reserveGuestRequests(db, guest, 'new-calls');
+        return json(sessionData(await db.createCall(guest, createSession(guestOrder, language))));
+      } catch (error) {
+        return requestError(error);
+      }
+    },
     async auth(request) {
       try {
         const localAccess = localAccessEnabled(request);
@@ -438,15 +472,16 @@ export function createDispatchHandlers({
     turn: protectedRoute(async (request, { db, actor, session }) => {
       assertRevision(session, request);
       const audio = request.headers.get('content-type')?.split(';')[0].trim() === 'audio/wav';
-      const providers = replyProviders();
+      const providers = replyProviders(actor === guest);
       const audioProvider = audio ? request.headers.get('x-reply-provider') ?? 'rules' : null;
       if (audio && (!['rules', 'auto'].includes(audioProvider) || !providers.includes(audioProvider))) {
         discardBody(request);
         throw new RequestError(400, 'Choose an available voice provider.');
       }
-      if (audio && !await db.rateLimit('voice:' + actor.sessionId, 40, 60_000)) {
+      if (audio && !await db.rateLimit('voice:' + requestLimitKey(actor, session), 40, 60_000)) {
         throw new RequestError(429, 'Voice request limit reached. Wait a moment or continue by text.');
       }
+      if (audio) await reserveGuestRequests(db, actor, 'voice');
       const body = audio
         ? { ...await voiceRoute(request, 'transcribe', { db, actor, session }), replyProvider: audioProvider }
         : await readJson(request);
@@ -467,7 +502,7 @@ export function createDispatchHandlers({
         throw new RequestError(400, 'Choose an available model for LLM interpretation.');
       }
       if (request.signal.aborted) throw new RequestError(408, 'The message was cancelled.');
-      const order = await requireOrder(db, actor.workspaceId, session.state.order.id);
+      const order = actor === guest ? session.state.order : await requireOrder(db, actor.workspaceId, session.state.order.id);
       if (session.state.order.revision !== order.revision) {
         refreshOrder(session, order);
         await db.saveCall(session);
@@ -486,9 +521,10 @@ export function createDispatchHandlers({
       let interpretation = automatic && shouldInterpret ? routeOrderLookup(candidate.order, input.text) : null;
       let interpretationSource = interpretation ? 'order-data' : usesModels ? 'controls' : 'parser';
       if (shouldInterpret && !interpretation) {
-        if (!await db.rateLimit('model-interpretation:' + actor.sessionId, 40, 60_000)) {
+        if (!await db.rateLimit('model-interpretation:' + requestLimitKey(actor, session), 40, 60_000)) {
           throw new RequestError(429, 'Too many model requests. Wait a moment or switch to the built-in parser.');
         }
+        await reserveGuestRequests(db, actor, 'model');
         const modelInput = { text: input.text, session: candidate, signal: request.signal };
         interpretationSource = automatic ? (sarvamEnabled() ? 'sarvam' : 'groq') : provider;
         interpretation = await interpret({ ...modelInput, provider: interpretationSource });
@@ -536,7 +572,10 @@ export function createDispatchHandlers({
         throw new RequestError(503, 'Hari could not finish the reply. Check that Ollama is running, then retry.', 'hari-unavailable');
       }
       let receipt;
-      if (change) {
+      if (change && actor === guest) {
+        candidate.order.revision++;
+        candidate.blockedRequests = [];
+      } else if (change) {
         const saved = await db.saveQuantity(actor.workspaceId, order.id, {
           itemId: change.itemId, quantity: change.to, newItem: change.newItem, revision: order.revision, actor: actor.user,
           backorderQuantity: change.backorderQuantity, updates: change.updates,
@@ -563,7 +602,7 @@ export function createDispatchHandlers({
         interpretationSource,
         ...(receipt ? { receipt } : {}),
       });
-    }, { sessionRequired: true, lock: true, operation: 'order.turn' }),
+    }, { sessionRequired: true, guestAllowed: true, lock: true, operation: 'order.turn' }),
     transcribe: speechRoute('transcribe'),
     speak: speechRoute('speak'),
     imports: protectedRoute(async (request, { db, actor }) => {

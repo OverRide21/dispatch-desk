@@ -40,7 +40,7 @@ export function savePreference(key, value) {
   try { window.sessionStorage.setItem(key, value); } catch { /* Storage can be disabled. */ }
 }
 
-function createDesk(render, meter, orderId, onUnauthorized) {
+function createDesk(render, meter, orderId, onUnauthorized, guest) {
   let model = initial;
   let sessionId;
   let voice;
@@ -121,7 +121,7 @@ function createDesk(render, meter, orderId, onUnauthorized) {
 
   function report(error, area) {
     if (lifecycle.signal.aborted) return;
-    if (error.status === 401) {
+    if (error.status === 401 && onUnauthorized) {
       endVoice('');
       onUnauthorized();
       return;
@@ -309,7 +309,7 @@ function createDesk(render, meter, orderId, onUnauthorized) {
     endVoice('');
     update({ busy: true, error: null });
     try {
-      const session = await request('/api/session?' + new URLSearchParams({
+      const session = guest ? await request('/api/session', { language: model.language }) : await request('/api/session?' + new URLSearchParams({
         orderId, language: model.language,
       }));
       applySnapshot(session);
@@ -381,12 +381,12 @@ function createDesk(render, meter, orderId, onUnauthorized) {
   };
 }
 
-export function useDispatch(orderId, onUnauthorized) {
+export function useDispatch(orderId, onUnauthorized, guest = false) {
   const [model, setModel] = useState(initial);
   const meter = useRef(null);
   const desk = useRef(null);
   useEffect(() => {
-    const controller = createDesk(setModel, meter, orderId, onUnauthorized);
+    const controller = createDesk(setModel, meter, orderId, onUnauthorized, guest);
     desk.current = controller;
     const storedLanguage = readPreference('dispatch-desk-language');
     if (storedLanguage) controller.setLanguage(storedLanguage);
@@ -401,6 +401,6 @@ export function useDispatch(orderId, onUnauthorized) {
       controller.dispose();
       desk.current = null;
     };
-  }, [orderId, onUnauthorized]);
+  }, [orderId, onUnauthorized, guest]);
   return { model, meter, desk };
 }

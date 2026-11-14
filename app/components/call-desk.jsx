@@ -227,7 +227,7 @@ function Conversation({ model, desk }) {
 
 const lockLabels = { shipped: 'Shipped', packed: 'Packed', cutoff: 'Cutoff passed' };
 
-function OrderTicket({ model, desk, onUnauthorized }) {
+function OrderTicket({ model, desk, onUnauthorized, guest }) {
   const [adding, setAdding] = useState(false);
   const session = model.session;
   const order = model.shippingOrder ?? session?.order;
@@ -356,13 +356,13 @@ function OrderTicket({ model, desk, onUnauthorized }) {
           })}</ol> : <p className="change-note">Confirmed edits appear here.</p>}
         </div>
       </section>
-      {order && <ReceiptHistory orderId={order.id} revision={order.revision} receipt={session.receipt} onUnauthorized={onUnauthorized} />}
+      {order && !guest && <ReceiptHistory orderId={order.id} revision={order.revision} receipt={session.receipt} onUnauthorized={onUnauthorized} />}
     </aside>
   );
 }
 
-function OrderCall({ orderId, onUnauthorized, onBack }) {
-  const { model, meter, desk } = useDispatch(orderId, onUnauthorized);
+function OrderCall({ orderId, onUnauthorized, onBack, guest = false }) {
+  const { model, meter, desk } = useDispatch(orderId, onUnauthorized, guest);
   const { pending, stockOffer, receipt, history } = model.session ?? {};
   const recentChange = pending ?? history?.[0];
   const changeCount = pending?.updates?.length ?? receipt?.changes.length ?? 0;
@@ -371,9 +371,10 @@ function OrderCall({ orderId, onUnauthorized, onBack }) {
     <>
       <main className="dispatch-main" id="main">
         <div className="intro">
-          <button className="action action-secondary back-to-orders" type="button" onClick={onBack}>← All orders</button>
+          {onBack && <button className="action action-secondary back-to-orders" type="button" onClick={onBack}>← All orders</button>}
           <h1>Talk through an <em>order change.</em></h1>
-          <p>Order <strong>{orderId}</strong>. Add or remove items, update a quantity, and confirm each change.</p>
+          <p>{guest ? 'Sample order. Try an update by voice or text, then confirm the change.' : <>
+            Order <strong>{orderId}</strong>. Add or remove items, update a quantity, and confirm each change.</>}</p>
         </div>
         <div className="call-layout">
           <div className="call-column">
@@ -387,9 +388,9 @@ function OrderCall({ orderId, onUnauthorized, onBack }) {
               <Icon name="arrow" size={18} />
             </a>}
             <Conversation model={model} desk={desk} />
-            {model.session?.voiceEnabled && <VoiceUsage sessionId={model.session.sessionId} onUnauthorized={onUnauthorized} />}
+            {model.session?.voiceEnabled && !guest && <VoiceUsage sessionId={model.session.sessionId} onUnauthorized={onUnauthorized} />}
           </div>
-          <OrderTicket model={model} desk={desk} onUnauthorized={onUnauthorized} />
+          <OrderTicket model={model} desk={desk} onUnauthorized={onUnauthorized} guest={guest} />
         </div>
       </main>
       <footer className="site-footer"><Icon name="lock" size={16} /> Packed items, shipped items, and items past their cutoff are locked. Edits are applied after you confirm them.</footer>
@@ -397,6 +398,17 @@ function OrderCall({ orderId, onUnauthorized, onBack }) {
   );
 }
 
-export default function CallDesk() {
-  return <DispatchWorkspace OrderCall={OrderCall} />;
+export default function CallDesk({ workspace = false }) {
+  if (workspace) return <DispatchWorkspace OrderCall={OrderCall} />;
+  return <div className="dispatch">
+    <a className="skip-link" href="#main">Skip to main content</a>
+    <header className="site-header">
+      <a className="wordmark" href="/"><span><Icon name="mark" /></span>Dispatch Desk</a>
+      <div className="header-actions">
+        <a className="action action-secondary" href="/dispatch-desk-pitch.pdf">Solution pitch</a>
+        <a className="action action-secondary" href="/workspace">Workspace</a>
+      </div>
+    </header>
+    <OrderCall guest />
+  </div>;
 }

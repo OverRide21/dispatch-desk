@@ -24,6 +24,39 @@ function quantities(view) {
   return { ...quantitiesById, changes: view.history.length, pending };
 }
 
+test('public sample calls keep confirmed edits isolated from other visitors and the workspace', async context => {
+  const store = await fixtureStore(context);
+  const handlers = createDispatchHandlers({ store, identify: () => null });
+  const open = (id, language = 'en-IN') => call(handlers, 'guestSession', {
+    headers: { 'Content-Type': 'application/json', ...(id ? { 'X-Session-Id': id } : {}) },
+    body: { language, orderId },
+  });
+  const first = await open().then(r => r.json());
+  const second = await open().then(r => r.json());
+  assert.notEqual(first.sessionId, second.sessionId);
+  assert.equal(first.order.id, 'SAMPLE-1048');
+  assert.equal(first.order.items[0].quantity, 24);
+  const send = (sessionId, text) => call(handlers, 'turn', {
+    headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
+    body: { text, language: 'en-IN', replyProvider: 'rules' },
+  });
+  const proposal = await send(first.sessionId, 'Set rice to 12 bags.').then(r => r.json());
+  assert.equal(proposal.pending.to, 12);
+  assert.equal(proposal.order.items[0].quantity, 24);
+  const updated = await send(first.sessionId, 'Confirm').then(r => r.json());
+  assert.equal(updated.order.items[0].quantity, 12);
+  assert.equal(updated.history.length, 1);
+  assert.equal((await open(first.sessionId).then(r => r.json())).order.items[0].quantity, 12);
+  assert.equal((await open(second.sessionId).then(r => r.json())).order.items[0].quantity, 24);
+  assert.equal((await store.getOrder(actor.workspaceId, orderId)).items[0].quantity, 20);
+  for (const route of ['orders', 'catalog', 'session']) {
+    assert.equal((await handlers[route](new Request(base + '/api/' + route, {
+      headers: { 'X-Session-Id': first.sessionId },
+    }))).status, 401);
+  }
+  assert.equal((await open(undefined, 'invalid')).status, 400);
+});
+
 test('Hindi and Marathi fixtures cover 200 unique call paths', async (context) => {
   assert.equal(dialogueCases.length, 200);
   assert.equal(new Set(dialogueCases.map((scenario) => scenario.id)).size, 200);

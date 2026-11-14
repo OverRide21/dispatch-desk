@@ -271,7 +271,7 @@ export default function Shop() {
             <p className={styles.reference}>{orderId}</p>
             <p>Use this reference to review the order with Dispatch Desk.</p>
             <div className={styles.successActions}>
-              <Link className="action action-primary" href={`/?orderId=${encodeURIComponent(orderId)}`}>Open in Dispatch Desk</Link>
+              <Link className="action action-primary" href={`/workspace?orderId=${encodeURIComponent(orderId)}`}>Open in Dispatch Desk</Link>
               <button type="button" className="action action-secondary" onClick={copyReference}>Copy reference</button>
               <button type="button" className={styles.textButton} onClick={startOrder}>Start another order</button>
             </div>
