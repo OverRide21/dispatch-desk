@@ -1,6 +1,6 @@
 # Dispatch Desk
 
-[Live project](https://dispatch-desk-sand.vercel.app/) · [One-page solution pitch (PDF)](public/dispatch-desk-pitch.pdf)
+[Live sample](https://dispatch-desk-sand.vercel.app/) · [Kirana Market storefront](https://dispatch-desk-sand.vercel.app/shop) · [Operator workspace](https://dispatch-desk-sand.vercel.app/workspace) · [One-page solution pitch (PDF)](public/dispatch-desk-pitch.pdf)
 
 Dispatch Desk is a browser voice and text workspace for changing wholesale orders in Hindi and Marathi. The desk uses the order’s current line items and fulfillment status. A confirmed quantity change is saved with the operator and timestamp. Shipped lines are locked.
 

@@ -404,10 +404,11 @@ export default function CallDesk({ workspace = false }) {
     <a className="skip-link" href="#main">Skip to main content</a>
     <header className="site-header">
       <a className="wordmark" href="/"><span><Icon name="mark" /></span>Dispatch Desk</a>
-      <div className="header-actions">
+      <nav className="header-actions public-navigation" aria-label="Project pages">
+        <a className="action action-secondary" href="/shop">Storefront</a>
         <a className="action action-secondary" href="/dispatch-desk-pitch.pdf">Solution pitch</a>
         <a className="action action-secondary" href="/workspace">Workspace</a>
-      </div>
+      </nav>
     </header>
     <OrderCall guest />
   </div>;

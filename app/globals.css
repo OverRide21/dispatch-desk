@@ -98,6 +98,7 @@ a { color: inherit; text-underline-offset: 0.22em; }
   color: var(--paper);
 }
 .header-actions { display: flex; align-items: center; gap: clamp(0.65rem, 2vw, 1.2rem); }
+.public-navigation { flex-wrap: wrap; justify-content: flex-end; }
 .account-name { max-width: 22ch; overflow: hidden; color: var(--muted); font-size: 0.82rem; text-overflow: ellipsis; white-space: nowrap; }
 .status-dot { display: inline-block; width: 0.42rem; height: 0.42rem; flex: none; border-radius: 50%; background: currentColor; }
 .action {
@@ -527,6 +528,8 @@ a { color: inherit; text-underline-offset: 0.22em; }
 @media (max-width: 480px) {
   .dispatch { padding-inline: 0.9rem; }
   .site-header { min-height: 65px; gap: 0.6rem; }
+  .site-header:has(.public-navigation) { flex-wrap: wrap; padding-block: 0.65rem; }
+  .public-navigation { justify-content: flex-start; }
   .wordmark { gap: 0.42rem; font-size: 0.96rem; }
   .wordmark span { width: 32px; height: 32px; }
   .account-name { display: none; }
