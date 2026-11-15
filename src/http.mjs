@@ -102,7 +102,7 @@ function replyProviders(guestCall = false) {
   return [
     'rules',
     ...(sarvamEnabled() || groq ? ['auto'] : []),
-    ...(!guestCall && groq ? ['groq'] : []),
+    ...(groq ? ['groq'] : []),
     ...(!guestCall ? ['ollama', 'ollama-hari'].filter(ollamaEnabled) : []),
   ];
 }
@@ -554,7 +554,15 @@ export function createDispatchHandlers({
         }
       }
       const { choices, change, rejectedChange, ...result } = handleTurn(candidate, { ...turnInput, interpretation });
-      const styleEnabled = !automatic && interpretationMode === 'parser' && provider !== 'rules';
+      let styleEnabled = !automatic && interpretationMode === 'parser' && provider !== 'rules';
+      if (styleEnabled && provider === 'groq' && choices && publicActor(actor)) {
+        try {
+          await reserveGuestRequests(db, actor, 'model');
+        } catch (error) {
+          if (error.status !== 429) throw error;
+          styleEnabled = false;
+        }
+      }
       const requireHari = styleEnabled && provider === 'ollama-hari';
       const variants = requireHari && choices
         ? choices.options.map(option => [choices.prefix, option.replace('{amount}', () => choices.amount)].filter(Boolean).join(' '))

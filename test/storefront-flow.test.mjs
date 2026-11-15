@@ -7,7 +7,7 @@ const base = 'http://dispatch.test';
 
 test('stock received by an admin is shared by storefront checkout and an open dispatch call', async context => {
   const old = { DISPATCH_WORKSPACE_ID: process.env.DISPATCH_WORKSPACE_ID,
-    DISPATCH_STOREFRONT_ENABLED: process.env.DISPATCH_STOREFRONT_ENABLED };
+    DISPATCH_STOREFRONT_ENABLED: process.env.DISPATCH_STOREFRONT_ENABLED, GROQ_API_KEY: process.env.GROQ_API_KEY };
   context.after(() => {
     for (const [name, value] of Object.entries(old)) {
       if (value === undefined) delete process.env[name];
@@ -17,6 +17,7 @@ test('stock received by an admin is shared by storefront checkout and an open di
   const workspaceId = 'shop-flow';
   process.env.DISPATCH_WORKSPACE_ID = workspaceId;
   process.env.DISPATCH_STOREFRONT_ENABLED = '1';
+  process.env.GROQ_API_KEY = 'test-credential';
   const store = await createStore(':memory:');
   context.after(() => store.close());
   const handlers = createDispatchHandlers({ store, identify: request => ({
@@ -44,13 +45,19 @@ test('stock received by an admin is shared by storefront checkout and an open di
   assert.equal(first.status, 201);
   const order = await first.json();
   assert.deepEqual(await (await checkout(8, 'checkout-test-first')).json(), order);
-  const publicHandlers = createDispatchHandlers({ store, identify: () => null });
+  const publicHandlers = createDispatchHandlers({ store, identify: () => null,
+    interpret: async ({ provider, session }) => {
+      assert.equal(provider, 'groq');
+      return { type: 'set', itemId: session.order.items[0].id, quantity: 12, unit: 'bags' };
+    },
+  });
   const openAsCustomer = (storeOrderId, accessKey) => publicHandlers.guestSession(request('/api/session', 'POST', {
     storeOrderId, accessKey, language: 'en-IN',
   }));
   assert.equal((await openAsCustomer(order.orderId, 'x'.repeat(43))).status, 404);
   const customerCall = await openAsCustomer(order.orderId, order.accessKey).then(response => response.json());
   assert.equal(customerCall.order.id, order.orderId);
+  assert.ok(customerCall.replyProviders.includes('groq'));
   assert.equal((await publicHandlers.orders(request('/api/orders', 'GET', undefined, {
     'X-Session-Id': customerCall.sessionId,
   }))).status, 401);
@@ -63,15 +70,17 @@ test('stock received by an admin is shared by storefront checkout and an open di
   assert.equal(second.status, 201);
   assert.equal((await openAsCustomer((await second.json()).orderId, order.accessKey)).status, 404);
 
-  async function turn(text, stockAction) {
-    const response = await publicHandlers.turn(request('/api/turn', 'POST', { text, language: 'en-IN', replyProvider: 'rules', stockAction }, {
+  async function turn(text, stockAction, settings = {}) {
+    const response = await publicHandlers.turn(request('/api/turn', 'POST', { text, language: 'en-IN', replyProvider: 'rules', stockAction, ...settings }, {
       'X-Session-Id': call.sessionId, 'X-Session-Revision': String(call.revision),
     }));
     assert.equal(response.status, 200);
     call = await response.json();
     return call;
   }
-  const offer = (await turn('Set rice to 12 bags.')).stockOffer;
+  const interpreted = await turn('Set rice to 12 bags.', undefined, { replyProvider: 'groq', interpretationMode: 'llm' });
+  assert.equal(interpreted.interpretationSource, 'groq');
+  const offer = interpreted.stockOffer;
   assert.equal(offer.available, 9);
   assert.ok(offer.options.some(option => option.type === 'substitute'));
   assert.equal((await turn('Use the substitute', { type: 'substitute' })).pending.updates.length, 2);
