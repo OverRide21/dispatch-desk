@@ -29,6 +29,7 @@ const initial = {
 };
 const replyPreferenceKey = 'dispatch-desk-reply-mode';
 const interpretationPreferenceKey = 'dispatch-desk-interpretation';
+const automaticInterpretationPreferenceKey = 'dispatch-desk-automatic-interpretation';
 const modelPath = '/api/session/model';
 const isLocalModel = provider => provider === 'ollama' || provider === 'ollama-hari';
 
@@ -38,6 +39,12 @@ export function readPreference(key) {
 
 export function savePreference(key, value) {
   try { window.sessionStorage.setItem(key, value); } catch { /* Storage can be disabled. */ }
+}
+
+function preferredInterpretation(provider) {
+  if (provider === 'auto') return readPreference(automaticInterpretationPreferenceKey) === 'parser' ? 'parser' : 'llm';
+  if (provider === 'rules') return 'parser';
+  return readPreference(interpretationPreferenceKey) === 'llm' ? 'llm' : 'parser';
 }
 
 function createDesk(render, meter, orderId, onUnauthorized, guest, accessKey) {
@@ -67,8 +74,7 @@ function createDesk(render, meter, orderId, onUnauthorized, guest, accessKey) {
     const replyProvider = session.replyProviders.includes(preferred) ? preferred
       : session.defaultReplyProvider ?? session.replyProviders[0];
     const providerChanged = replyProvider !== model.replyProvider;
-    const interpretationMode = replyProvider === 'rules' ? 'parser'
-      : !model.session && readPreference(interpretationPreferenceKey) === 'llm' ? 'llm' : model.interpretationMode;
+    const interpretationMode = providerChanged ? preferredInterpretation(replyProvider) : model.interpretationMode;
     update({
       session, replyProvider, replySource: session.replySource ?? null,
       interpretationMode, interpretationSource: session.interpretationSource ?? null,
@@ -186,16 +192,17 @@ function createDesk(render, meter, orderId, onUnauthorized, guest, accessKey) {
     if (model.busy || replyProvider === model.replyProvider || !model.session?.replyProviders.includes(replyProvider)) return;
     savePreference(replyPreferenceKey, replyProvider);
     if (replyProvider === 'rules') savePreference(interpretationPreferenceKey, 'parser');
-    update({ replyProvider, interpretationSource: null, replySource: null,
-      ...(replyProvider === 'rules' ? { interpretationMode: 'parser' } : {}) });
+    const interpretationMode = replyProvider === 'auto' || model.replyProvider === 'auto' || replyProvider === 'rules'
+      ? preferredInterpretation(replyProvider) : model.interpretationMode;
+    update({ replyProvider, interpretationMode, interpretationSource: null, replySource: null });
     startModel(replyProvider);
   }
 
   function setInterpretationMode(interpretationMode) {
-    if (model.busy || model.replyProvider === 'auto' || !['parser', 'llm'].includes(interpretationMode) ||
+    if (model.busy || !['parser', 'llm'].includes(interpretationMode) ||
         interpretationMode === 'llm' && model.replyProvider === 'rules') return;
-    savePreference(interpretationPreferenceKey, interpretationMode);
-    update({ interpretationMode, interpretationSource: null });
+    savePreference(model.replyProvider === 'auto' ? automaticInterpretationPreferenceKey : interpretationPreferenceKey, interpretationMode);
+    update({ interpretationMode, interpretationSource: null, replySource: null });
   }
 
   function startModel(provider) {
@@ -272,8 +279,9 @@ function createDesk(render, meter, orderId, onUnauthorized, guest, accessKey) {
     try {
       if (warming && !await checkModel()) return false;
       if (lifecycle.signal.aborted || recording?.signal.aborted || source === 'voice' && !model.callActive) return false;
-      const session = await request('/api/turn', recording ? { audio: recording.audio, language, replyProvider: model.replyProvider }
-        : { text: message, language, replyProvider: model.replyProvider, interpretationMode: model.interpretationMode, itemAction, stockAction }, recording?.signal);
+      const replyProvider = model.replyProvider === 'auto' && model.interpretationMode === 'parser' ? 'rules' : model.replyProvider;
+      const session = await request('/api/turn', recording ? { audio: recording.audio, language, replyProvider }
+        : { text: message, language, replyProvider, interpretationMode: model.interpretationMode, itemAction, stockAction }, recording?.signal);
       const replyMs = Math.round(performance.now() - started);
       applySnapshot(session);
       if (!model.callActive && !session.pending && !session.stockOffer) releaseShipping();

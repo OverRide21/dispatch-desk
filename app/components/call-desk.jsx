@@ -165,16 +165,18 @@ function Conversation({ model, desk }) {
             </option>
           ))}
         </select>
-        {model.replyProvider !== 'auto' && <>
-          <label htmlFor="interpretation-mode">Interpretation</label>
-          <select id="interpretation-mode" value={model.interpretationMode}
-            disabled={model.busy || model.startingMic || model.audioState === 'processing'}
-            onChange={event => desk.current?.setInterpretationMode(event.target.value)}>
-            <option value="parser">Built-in parser</option>
-            <option value="llm" disabled={model.replyProvider === 'rules'}>LLM · selected model</option>
-          </select>
-        </>}
-        {model.replyProvider === 'auto' && <span>The order desk handles lookups and confirmations. A hosted model interprets other requests.</span>}
+        <label htmlFor="interpretation-mode">Interpretation</label>
+        <select id="interpretation-mode" value={model.interpretationMode}
+          disabled={model.busy || model.startingMic || model.audioState === 'processing'}
+          onChange={event => desk.current?.setInterpretationMode(event.target.value)}>
+          <option value="parser">Built-in parser</option>
+          <option value="llm" disabled={model.replyProvider === 'rules'}>
+            {model.replyProvider === 'auto' ? 'LLM · automatic routing' : 'LLM · selected model'}
+          </option>
+        </select>
+        {model.replyProvider === 'auto' && <span>{model.interpretationMode === 'llm'
+          ? 'The order desk handles lookups and confirmations. A hosted model interprets other requests.'
+          : 'The built-in parser handles order requests and replies.'}</span>}
         {model.replyProvider === 'rules' && <span>Select a model to enable LLM interpretation.</span>}
         {model.interpretationMode === 'llm' && model.replyProvider === 'groq' &&
           <span>Groq receives the request text and order line details.</span>}
@@ -185,9 +187,9 @@ function Conversation({ model, desk }) {
         </span>}
         {model.modelStatus === 'unavailable' && <button className="action action-secondary" type="button"
           onClick={() => void desk.current?.retryModel()}>Retry warm-up</button>}
-        {(model.replyProvider === 'auto' || model.interpretationMode === 'llm') && interpretationLabels[model.interpretationSource] &&
+        {model.interpretationMode === 'llm' && interpretationLabels[model.interpretationSource] &&
           <span>Last handled by {interpretationLabels[model.interpretationSource]}</span>}
-        {model.replyProvider !== 'auto' && model.interpretationMode === 'parser' && model.replySource &&
+        {model.interpretationMode === 'parser' && model.replySource &&
           <span>Last reply from {replyProviderLabels[model.replySource]}</span>}
         {model.typedReplyMs !== null && <span>Last typed reply · {model.typedReplyMs} ms</span>}
       </div>}
