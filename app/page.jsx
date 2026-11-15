@@ -1,5 +1,5 @@
-import CallDesk from './components/call-desk.jsx';
+import HomeExperience from './components/home-experience.jsx';
 
 export default function Home() {
-  return <CallDesk />;
+  return <HomeExperience />;
 }

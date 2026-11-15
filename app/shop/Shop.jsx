@@ -48,7 +48,8 @@ function ShopHeader({ itemCount, showCart }) {
     <header className={styles.header}>
       <Link href="/shop" className="wordmark"><span className={styles.mark}><BagIcon /></span>Kirana Market</Link>
       <div className={styles.headerLinks}>
-        <Link className={styles.deskLink} href="/">Dispatch Desk</Link>
+        <Link className={styles.deskLink} href="/">Home</Link>
+        <Link className={styles.deskLink} href="/desk">Dispatch Desk</Link>
         {showCart && <a href="#shop-cart" className={styles.cartShortcut}><BagIcon size={18} /> Cart <span>{itemCount}</span></a>}
       </div>
     </header>
@@ -282,7 +283,7 @@ export default function Shop() {
           <section className={styles.unavailableShop} aria-labelledby="shop-unavailable">
             <h2 id="shop-unavailable">Shop unavailable</h2>
             <p className={styles.empty}>{catalog.error.message}</p>
-            <Link className="action action-secondary" href="/">Open Dispatch Desk</Link>
+            <Link className="action action-secondary" href="/desk">Open Dispatch Desk</Link>
           </section>
         ) : (
           <div className={styles.layout}>

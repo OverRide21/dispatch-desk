@@ -429,6 +429,7 @@ export default function CallDesk({ workspace = false, operator = false }) {
     <header className="site-header">
       <a className="wordmark" href="/"><span><Icon name="mark" /></span>Dispatch Desk</a>
       <nav className="header-actions public-navigation" aria-label="Project pages">
+        <a className="action action-secondary" href="/">Home</a>
         <a className="action action-secondary" href="/shop">Storefront</a>
         <a className="action action-secondary" href="/dispatch-desk-pitch.pdf">Solution pitch</a>
         <a className="action action-secondary" href="/workspace">Your orders</a>

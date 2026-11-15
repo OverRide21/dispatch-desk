@@ -286,3 +286,29 @@
   .products { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .62rem; }
   .lineAmount { grid-template-columns: 5rem minmax(0, 1fr) auto; }
 }
+
+/* The market shares the dispatch identity, with green reserved for basket actions. */
+.storefront { background: var(--cream); }
+.header { background: var(--cream); min-height: 88px; }
+.hero { background: var(--coral); padding: clamp(24px, 4vw, 48px); margin-block: 24px 32px; position: relative; overflow: hidden; }
+.hero h1 { font-family: 'Outfit', sans-serif; font-size: clamp(36px, 4.7vw, 60px); font-weight: 550; }
+.hero p { max-width: 43ch; color: var(--coral-ink); line-height: 1.65; }
+.product { transition: transform 220ms var(--ease-out), border-color 220ms; }
+.product:hover { transform: translateY(-4px); border-color: #9b866e; }
+.productImage { overflow: hidden; }
+.productImage img { transition: transform 450ms var(--ease-out); }
+.product:hover .productImage img { transform: scale(1.05); }
+.add, .categories button, .cartShortcut { transition: transform 180ms var(--ease-out), background-color 180ms, color 180ms; }
+.add:active:not(:disabled), .categories button:active { transform: scale(.95); }
+.cartRows li { animation: basket-arrive 240ms var(--ease-out); }
+.success { animation: basket-arrive 350ms var(--ease-out); }
+@keyframes basket-arrive { from { transform: translateY(8px); } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+ .product, .productImage img, .add, .categories button, .cartShortcut, .cartRows li, .success { transition: none; animation: none; }
+ .product:hover, .product:hover .productImage img, .add:active:not(:disabled), .categories button:active { transform: none; }
+}
+@media (max-width: 600px) {
+ .header { flex-wrap: wrap; padding-block: 16px; gap: 12px; }
+ .headerLinks { width: 100%; justify-content: space-between; }
+ .deskLink { font-size: .85rem; }
+}

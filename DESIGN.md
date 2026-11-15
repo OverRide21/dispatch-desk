@@ -2,6 +2,9 @@
 name: Dispatch Desk
 description: A voice-first wholesale order desk with a paper order ticket
 colors:
+  grain: "#f5dba3"
+  tea: "#dce4c8"
+  pantry: "#ffd5c6"
   cream: "#fff1db"
   paper: "#fffaf0"
   ink: "#271710"
@@ -24,7 +27,7 @@ colors:
   error-ink: "#6b2016"
 typography:
   display:
-    fontFamily: '"Aptos Display", "Aptos", "Segoe UI", system-ui, sans-serif'
+    fontFamily: '"Outfit", "Aptos", "Segoe UI", system-ui, sans-serif'
     fontSize: "clamp(2.45rem, 5.25vw, 4.55rem)"
     fontWeight: 760
     lineHeight: 0.99
@@ -167,3 +170,31 @@ The stage, order ticket, and workspace panels use 16px corners. Buttons and form
 - Do show the previous and proposed or saved quantities together.
 - Do retain text labels when color signals an order or call state.
 - Don't remove language attributes from Hindi and Marathi transcript text.
+
+## November 2026 home and interaction expansion
+
+The home route is a public introduction to shopping and conversational order support.
+The sample call desk now lives at `/desk`. Shopper orders remain at `/workspace` and
+store management remains at `/operator`. The home preview is explicitly illustrative
+and makes no model or speech API requests.
+
+### Reference lock and design decisions
+
+- Preserve the user's cream canvas, vivid coral, ink brown, and printed-ticket identity.
+- Follow Refero's bundled typography guidance for a distinct display scale and bounded
+  prose, using self-hosted Outfit with its OFL license. Keep native Indic font fallbacks.
+- Use the existing product photographs as real product evidence, in generously spaced
+  product compositions. Keep green for stock and basket meaning.
+- Follow the bundled motion guidance with short interaction feedback, limited waveform
+  cycles, and progressive scroll-linked translations. Never wait for motion before input.
+- The signature interaction is a three-language conversation preview with an explicit
+  review/confirm/reset ticket. It never edits a real order or spends API credits.
+- Apply quick button, product, basket, transcript, and saved-ticket feedback across the
+  app. Respect reduced motion and preserve visible content without animation support.
+- Retain compact controls and business validation on the operational screens.
+
+Home scroll motion uses one-shot IntersectionObserver entrances: staggered product tickets, sequential workflow steps, and a closing invitation. Web Animations use only transform and opacity, cancel on keyboard focus or reduced-motion changes, and leave content visible by default. No scroll interception or animation library is used.
+
+The home page begins with a full-viewport coral brand screen: the waveform mark, Dispatch Desk wordmark, and a keyboard-accessible scroll anchor. Native scrolling reveals the existing cream header and conversation hero. Supporting browsers gently recede the opening wordmark with a CSS scroll timeline; the hero uses the existing one-shot entrance system. Reduced motion retains the same screen order with static content.
+
+Motion references: GreenSock layered panels (https://codepen.io/GreenSock/pen/WNWPKBp) informs the pinned opening/covering surface. GSAP ScrollTrigger examples (https://gsap.com/docs/v3/Plugins/ScrollTrigger/) inform sequencing. Implementation retains native scrolling and Web Animations: masked headline lines, staggered controls, opposing conversation entrances and a settling ticket. The cream surface squares off as it finishes covering the opening.

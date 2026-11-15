@@ -554,3 +554,31 @@ a { color: inherit; text-underline-offset: 0.22em; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Shared motion language: quick feedback, no delayed interaction. */
+@font-face { font-family: 'Outfit'; src: url('/fonts/outfit.ttf') format('truetype'); font-weight: 100 900; font-display: swap; }
+::selection { background: #ff765f; color: #271710; }
+input, textarea { caret-color: var(--red); }
+:root { scrollbar-color: #b77863 var(--cream); }
+.intro h1, .wordmark, .workspace-header h1 { font-family: 'Outfit', 'Aptos', sans-serif; }
+.site-header { min-height: 88px; }
+.wordmark span { background: var(--coral); color: var(--ink); }
+.action { transition: transform 180ms var(--ease-out), background-color 180ms, border-color 180ms, color 180ms; }
+.action:hover:not(:disabled) { transform: translateY(-2px); }
+.action:active:not(:disabled) { transform: translateY(0) scale(.98); }
+.voice-stage { box-shadow: 0 12px 30px -25px #9c3a2b; }
+.ticket { box-shadow: 0 18px 38px -30px #694733; }
+.turn, .confirmation-actions, .history-list > li, .add-item-form { animation: dispatch-arrive 240ms var(--ease-out); }
+.ticket[data-state='saved'] .ticket-change { animation: dispatch-confirm 450ms var(--ease-out); }
+input, select, textarea { transition: border-color 160ms, background-color 160ms; }
+input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--red); }
+@keyframes dispatch-arrive { from { transform: translateY(6px); } to { transform: translateY(0); } }
+@keyframes dispatch-confirm { from { background-color: #cddb9d; } to { background-color: var(--saved-paper); } }
+@media (prefers-reduced-motion: reduce) {
+ .action, .turn, .confirmation-actions, .history-list > li, .add-item-form, .ticket[data-state='saved'] .ticket-change { animation: none !important; transition: none !important; }
+ .action:hover:not(:disabled), .action:active:not(:disabled) { transform: none; }
+}
+
+.route-arrival { animation: route-arrival 300ms var(--ease-out); }
+@keyframes route-arrival { from { transform: translateY(5px); } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .route-arrival { animation: none; } }
