@@ -36,7 +36,7 @@ const replyProviderLabels = {
   'ollama-hari': 'Local · Hari 4B (8-bit)',
   rules: 'Fast · Local order engine',
 };
-const interpretationLabels = { ...replyProviderLabels, sarvam: 'Sarvam 105B', 'order-data': 'Order lookup', controls: 'Dispatch Desk controls' };
+const interpretationLabels = { ...replyProviderLabels, sarvam: 'Sarvam 105B', parser: 'Built-in parser', 'order-data': 'Order lookup', controls: 'Dispatch Desk controls' };
 
 function VoiceStage({ model, meter, desk }) {
   const canSpeak = Boolean(model.session?.voiceEnabled && model.voiceReady);
@@ -175,7 +175,7 @@ function Conversation({ model, desk }) {
           </option>
         </select>
         {model.replyProvider === 'auto' && <span>{model.interpretationMode === 'llm'
-          ? 'The order desk handles lookups and confirmations. A hosted model interprets other requests.'
+          ? 'The order desk handles lookups and clear quantity changes. A hosted model interprets other requests.'
           : 'The built-in parser handles order requests and replies.'}</span>}
         {model.replyProvider === 'rules' && <span>Select a model to enable LLM interpretation.</span>}
         {model.interpretationMode === 'llm' && model.replyProvider === 'groq' &&

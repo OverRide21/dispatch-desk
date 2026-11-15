@@ -125,7 +125,7 @@ export async function synthesize(text, { language, signal } = {}) {
   const v25Voices = { 'mr-IN': 'Zahira', 'hi-IN': 'Nalini', 'en-IN': 'Kaveri' };
   const voice = process.env.GNANI_TTS_VOICE || (model === 'timbre-v2.5' ? v25Voices[locale] : 'Yashraj');
   const response = await providerRequest('/api/v1/tts/sse', {
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Accept-Encoding': 'identity' },
     body: JSON.stringify({
       text,
       language: locale,

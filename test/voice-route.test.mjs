@@ -99,10 +99,11 @@ test('voice routes keep the selected language through transcription and playback
   assert.equal(transcribed.status, 200);
   assert.deepEqual(await transcribed.json(), { text: 'तांदूळ दहा करा', language: 'mr-IN' });
 
-  const turn = await handlers.turn(new Request(dispatch + '/api/turn', {
+  const requestChange = text => handlers.turn(new Request(dispatch + '/api/turn', {
     method: 'POST', headers: { ...sessionHeaders, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: 'तांदूळ दहा करा', language: 'mr-IN' }),
+    body: JSON.stringify({ text, language: 'mr-IN' }),
   })).then(r => r.json());
+  const turn = await requestChange('तांदूळ दहा करा');
   assert.equal((await speak('An unrelated phrase')).status, 409);
   const spoken = await speak(turn.reply);
   assert.equal(spoken.status, 200);
@@ -113,11 +114,12 @@ test('voice routes keep the selected language through transcription and playback
     { path: '/stt/v3', key: 'test-credential', language: 'mr-IN', audio: wav },
     { path: '/api/v1/tts/sse', key: 'test-credential', language: 'mr-IN', text: turn.reply, voice: 'Yashraj', model: 'timbre-v3.0' },
   ]);
+  const uncached = await requestChange('तांदूळ बारा करा');
   behavior = 'rate';
-  assert.equal((await speak(turn.reply)).status, 429);
+  assert.equal((await speak(uncached.reply)).status, 429);
 
   behavior = 'interrupt';
-  const playing = await speak(turn.reply);
+  const playing = await speak(uncached.reply);
   const reader = playing.body.getReader();
   const first = await reader.read();
   assert.deepEqual(Buffer.from(first.value), Buffer.from([1, 2, 3, 4]));

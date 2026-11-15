@@ -203,7 +203,7 @@ test('a Fast voice turn transcribes and proposes a change in one request under t
   assert.equal(provider.mock.callCount(), 1);
 });
 
-test('automatic voice turns route the Gnani transcript to order data or Sarvam', async t => {
+test('automatic voice turns route the transcript to order data, the parser, or Sarvam', async t => {
   for (const key of ['GNANI_API_KEY', 'SARVAM_API_KEY']) {
     const previous = process.env[key];
     process.env[key] = 'test-credential';
@@ -236,10 +236,45 @@ test('automatic voice turns route the Gnani transcript to order data or Sarvam',
   const lookup = await speak(session.revision);
   assert.equal(lookup.interpretationSource, 'order-data');
   assert.deepEqual(models, []);
+  transcript = 'तांदळाच्या आठ पिशव्या करा.';
+  const clear = await speak(lookup.revision);
+  assert.equal(clear.interpretationSource, 'parser');
+  assert.equal(clear.pending.to, 8);
+  assert.deepEqual(models, []);
   transcript = 'तांदूळ दहा करा';
-  const edit = await speak(lookup.revision);
+  const edit = await speak(clear.revision);
   assert.equal(edit.interpretationSource, 'sarvam');
   assert.equal(edit.language, 'mr-IN');
   assert.equal(edit.pending.to, 10);
   assert.deepEqual(models, [transcript]);
+});
+
+test('complete speech is reused within a workspace after validating the current reply', async t => {
+  const previousKey = process.env.GNANI_API_KEY;
+  process.env.GNANI_API_KEY = 'test-credential';
+  t.after(() => { if (previousKey === undefined) delete process.env.GNANI_API_KEY; else process.env.GNANI_API_KEY = previousKey; });
+  const pcm = Buffer.from([1, 0, 2, 0]);
+  const provider = t.mock.method(globalThis, 'fetch', async (url, request) => {
+    assert.equal(request.headers['Accept-Encoding'], 'identity');
+    return new Response('event: chunk\ndata: ' + JSON.stringify({ audio: pcm.toString('base64') }) +
+      '\n\nevent: complete\ndata: {"is_final":true}\n\n');
+  });
+  const store = await fixtureStore(t);
+  const handlers = createDispatchHandlers({ store, identify: () => actor });
+  const base = 'http://dispatch.test';
+  const session = async () => (await handlers.session(new Request(base + '/api/session?orderId=' + orderId + '&language=mr-IN'))).json();
+  const first = await session();
+  const second = await session();
+  const speak = (view, text = view.messages.at(-1).text) => handlers.speak(new Request(base + '/api/voice/speak', {
+    method: 'POST', headers: { 'x-session-id': view.sessionId, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, language: 'mr-IN' }),
+  }));
+  for (const view of [first, second]) {
+    const response = await speak(view);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('X-Sample-Rate'), '24000');
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), pcm);
+  }
+  assert.equal((await speak(second, 'Different reply')).status, 409);
+  assert.equal(provider.mock.callCount(), 1);
 });

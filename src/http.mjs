@@ -1,4 +1,4 @@
-import { createSession, handleTurn, routeOrderLookup, shouldInterpretTurn, snapshot, transcriptionKeyterms } from './orders.mjs';
+import { createSession, handleTurn, routeOrderLookup, routeQuantityChange, shouldInterpretTurn, snapshot, transcriptionKeyterms } from './orders.mjs';
 import { interpretOrderTurn } from './order-interpretation.mjs';
 import { synthesize, transcribe, voiceAvailable } from './gnani.mjs';
 import { ollamaEnabled, personalizeReply, warmOllama } from './ollama.mjs';
@@ -150,7 +150,10 @@ function requestError(error) {
   return json({ error: 'Something went wrong. Please try again.' }, 500);
 }
 
-async function voiceRoute(request, action, { db, actor, session }) {
+const maxCachedSpeechBytes = 384_000;
+const speechCacheTtl = 5 * 60_000;
+
+async function voiceRoute(request, action, { db, actor, session, speechCache }) {
   const sarvamSpeech = action === 'transcribe' && process.env.DISPATCH_STT_PROVIDER === 'sarvam';
   if (sarvamSpeech ? !sarvamEnabled() : !voiceAvailable()) {
     discardBody(request);
@@ -184,12 +187,20 @@ async function voiceRoute(request, action, { db, actor, session }) {
     }
     signal.throwIfAborted();
     await db.voiceUsage.reserve(actor.workspaceId, session.id, { synthesisCharacters: [...text].length });
+    const cacheKey = JSON.stringify([actor.workspaceId, language, text]);
+    const cached = speechCache.get(cacheKey);
+    if (cached) {
+      if (cached.expires > Date.now()) return new Response(cached.bytes, { headers: cached.headers });
+      speechCache.delete(cacheKey);
+    }
     const audio = await synthesize(text, { language, signal });
-    const headers = { ...responseHeaders, 'Content-Type': audio.contentType };
+    const headers = { ...responseHeaders, 'Cache-Control': 'no-store, no-transform', 'Content-Type': audio.contentType };
     if (audio.sampleRate) headers['X-Sample-Rate'] = audio.sampleRate;
 
     const reader = audio.body.getReader();
     let cancelled = false;
+    let chunks = [];
+    let size = 0;
     return new Response(new ReadableStream({
       async pull(controller) {
         try {
@@ -197,8 +208,15 @@ async function voiceRoute(request, action, { db, actor, session }) {
           if (cancelled) return;
           if (done) {
             reader.releaseLock();
+            if (chunks && size && !signal.aborted) {
+              speechCache.set(cacheKey, { bytes: Buffer.concat(chunks, size), headers, expires: Date.now() + speechCacheTtl });
+              if (speechCache.size > 32) speechCache.delete(speechCache.keys().next().value);
+            }
             controller.close();
           } else {
+            size += value.byteLength;
+            if (size > maxCachedSpeechBytes) chunks = null;
+            chunks?.push(value);
             controller.enqueue(value);
           }
         } catch (error) {
@@ -270,6 +288,7 @@ export function createDispatchHandlers({
   styleReply = styleOrderReply, warmReplyModel = warmOllama, interpret = interpretOrderTurn,
 } = {}) {
   const database = () => store ?? getStore();
+  const speechCache = new Map();
   const protectedRoute = (action, { sessionRequired = false, guestAllowed = false, lock = false, admin = false, operation } = {}) => async (request) => {
     let db;
     let session;
@@ -317,7 +336,7 @@ export function createDispatchHandlers({
       throw new RequestError(429, 'Voice request limit reached. Wait a moment or continue by text.');
     }
     await reserveGuestRequests(db, actor, 'voice');
-    const result = await voiceRoute(request, action, { db, actor, session });
+    const result = await voiceRoute(request, action, { db, actor, session, speechCache });
     return action === 'transcribe' ? json(result) : result;
   }, { sessionRequired: true, guestAllowed: true, operation: `voice.${action}` });
   const manageCatalog = action => protectedRoute(async (request, context) => {
@@ -536,6 +555,10 @@ export function createDispatchHandlers({
       const shouldInterpret = usesModels && shouldInterpretTurn(candidate, turnInput);
       let interpretation = automatic && shouldInterpret ? routeOrderLookup(candidate.order, input.text) : null;
       let interpretationSource = interpretation ? 'order-data' : usesModels ? 'controls' : 'parser';
+      if (automatic && shouldInterpret && !interpretation) {
+        interpretation = routeQuantityChange(candidate.order, input.text);
+        if (interpretation) interpretationSource = 'parser';
+      }
       if (shouldInterpret && !interpretation) {
         if (!await db.rateLimit('model-interpretation:' + requestLimitKey(actor, session), 40, 60_000)) {
           throw new RequestError(429, 'Too many model requests. Wait a moment or switch to the built-in parser.');

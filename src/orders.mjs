@@ -473,6 +473,24 @@ export function routeOrderLookup(order, text) {
   return { type: stock ? 'stock' : delivery ? 'delivery' : 'status', itemId };
 }
 
+export function routeQuantityChange(order, text) {
+  const matcher = itemMatcher(order.items, true);
+  const command = normalize(text).replace(/[.!।]+$/u, '').trim();
+  const [itemId, secondItem] = matcher.ids(command);
+  if (!itemId || secondItem) return null;
+  const item = order.items.find(row => row.id === itemId);
+  const unit = unitFamily(normalize(item.unit));
+  const unitPattern = unitMentions.find(([family]) => family === unit)?.[1];
+  if (!unitPattern) return null;
+  const remainder = quantitySpacing(matcher.withoutItems(command));
+  const signature = remainder
+    .replace(numberRegex, (number, index) => isQuantityWord(remainder, number, index) ? '#' : number)
+    .replace(unitPattern, '@').replace(/\s+/gu, ' ').trim();
+  if (!/^(?:(?:please )?(?:set|change) to # @|(?:please )?make (?:it )?# @(?: of)?|(?:की |को )?# @ (?:कर दो|कर दीजिए|कर दीजिये|करें)|# @ (?:करा|ठेवा))$/u.test(signature)) return null;
+  const { value: quantity } = extractQuantity(remainder);
+  return Number.isSafeInteger(quantity) && quantity >= 0 ? { type: 'set', itemId, quantity, unit } : null;
+}
+
 export function handleTurn(session, { text = '', language, itemAction, stockAction, interpretation, now = Date.now() } = {}) {
   const input = typeof text === 'string' ? normalize(text) : '';
   const locale = localeFor(input, language, session.messages.at(-1)?.language);
